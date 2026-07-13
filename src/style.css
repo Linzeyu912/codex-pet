@@ -1,0 +1,162 @@
+:root {
+  font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  color: #f7fbff;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+}
+
+* {
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent !important;
+}
+
+button {
+  font: inherit;
+}
+
+.pet-shell {
+  position: absolute;
+  inset: 0;
+  cursor: grab;
+  display: grid;
+  place-items: end center;
+  padding-bottom: 12px;
+}
+
+.pet-shell:active {
+  cursor: grabbing;
+}
+
+.sprite-stage {
+  position: relative;
+  width: 230px;
+  height: 248px;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 8px 6px rgb(0 0 0 / 24%));
+}
+
+.sprite {
+  width: 192px;
+  height: 208px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-repeat: no-repeat;
+  transform: scale(1.12);
+  transform-origin: center bottom;
+}
+
+.fallback-pet {
+  width: 188px;
+  height: 208px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.speech-bubble {
+  position: absolute;
+  z-index: 3;
+  top: 6px;
+  left: 50%;
+  max-width: 220px;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 7px 12px;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 14px;
+  color: #12243a;
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 5px 14px rgb(4 17 38 / 18%);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+}
+
+.pet-shell:hover .speech-bubble,
+.pet-shell[data-state="waiting"] .speech-bubble,
+.pet-shell[data-state="failed"] .speech-bubble,
+.pet-shell[data-state="jumping"] .speech-bubble {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.state-dot {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid rgb(255 255 255 / 85%);
+  border-radius: 50%;
+  background: #70d68a;
+  box-shadow: 0 1px 5px rgb(0 0 0 / 24%);
+}
+
+.pet-shell[data-state="running"] .state-dot,
+.pet-shell[data-state="review"] .state-dot {
+  background: #4da3ff;
+}
+
+.pet-shell[data-state="waiting"] .state-dot {
+  background: #ffcc4d;
+}
+
+.pet-shell[data-state="failed"] .state-dot {
+  background: #ff6b6b;
+}
+
+.context-menu {
+  position: absolute;
+  z-index: 20;
+  width: 184px;
+  padding: 7px;
+  border: 1px solid rgb(255 255 255 / 32%);
+  border-radius: 12px;
+  color: #f5f8ff;
+  background: rgb(18 28 45 / 94%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 34%);
+  backdrop-filter: blur(12px);
+}
+
+.context-menu[hidden] {
+  display: none;
+}
+
+.context-menu button {
+  width: 100%;
+  min-height: 33px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu button:hover {
+  background: rgb(93 156 236 / 24%);
+}
+
+.context-menu button.danger:hover {
+  background: rgb(255 87 87 / 24%);
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: rgb(255 255 255 / 14%);
+}

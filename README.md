@@ -1,89 +1,207 @@
 # Codex Pet
 
-一只住在桌面上的 Codex 小企鹅。
+一只住在 Windows 桌面和 Codex 里的像素企鹅。
 
-Codex Pet 是一个面向 Codex 使用场景的桌面宠物项目。它从早期 QQ 农场企鹅带来的陪伴感中获得灵感，希望把编程过程中的等待、思考、成功与失败，变成一只有情绪、有动作、会成长的小企鹅。
+Codex Pet 把 Codex 的工作、等待、完成和失败状态变成桌面宠物动作。当前原型包含两种形态：
 
-> 当前状态：项目初始化，正在设计第一个可运行原型。
+- **Codex 内置宠物**：使用 Codex Pets V2 图集，可在 Codex 设置中选择。
+- **Windows 桌面宠物**：透明、置顶、可拖动，带右键菜单、托盘、位置记忆和开机启动。
 
-## 产品设想
+> 当前版本：`0.1.0`。代码仓库不分发 QQ、腾讯或其他第三方拥有权利的角色素材；经典企鹅像素重绘只用于本地原型，并被 Git 忽略。
 
-小企鹅会以透明、置顶的小窗口生活在桌面上，并根据 Codex 的工作状态做出反馈：
+## 当前进度
 
-- 空闲时散步、发呆或睡觉
-- Codex 思考时观察屏幕、翻书或敲键盘
-- 任务完成时庆祝，并给予轻量提示
-- 执行失败时表现困惑，但不会打断工作
-- 长时间工作时提醒休息、喝水或活动身体
-- 随着使用逐渐解锁动作、装扮和桌面小物件
+- [x] D 盘本地仓库与 GitHub 远程仓库连接
+- [x] 经典红围巾企鹅的本地像素基准图
+- [x] Codex Pets V2 `8 × 11` 动作图集
+- [x] 通过当前 Codex 官方图集校验器（零错误、零警告）
+- [x] 安装到本机 Codex Pets 目录
+- [x] Windows 透明置顶桌面宠物
+- [x] 拖动、位置记忆、右键菜单、托盘与开机启动
+- [x] Codex 状态文件桥接与动作演示
+- [x] 可直接运行的 Windows 便携包
+- [ ] 自动观察现有 Codex 桌面任务的全部实时阶段
+- [ ] 经过代码签名的 `.exe` / NSIS 安装包
 
-目标不是增加新的通知负担，而是用克制、自然的动画让 AI 编程更有陪伴感。
+## 立即运行
 
-## 首个版本（MVP）
+环境要求：Windows 10/11、Node.js 20.19+ 或 22.12+、pnpm 11+；推荐 Node.js 24。本仓库已在 Node.js 24 与 pnpm 11 上验证。
 
-首版计划聚焦于最小但完整的体验：
+```powershell
+pnpm install
+pnpm assets:prepare
+pnpm dev
+```
 
-- [ ] 透明背景、无边框、始终置顶的宠物窗口
-- [ ] 支持拖动，并记住上次停留的位置
-- [ ] 待机、行走、思考、成功、失败五种基础状态
-- [ ] 右键菜单：暂停动画、隐藏、设置和退出
-- [ ] 开机启动与基础音效开关
-- [ ] 接收 Codex 状态事件，并映射为宠物动作
-- [ ] Windows 安装包
+干净克隆没有本地角色素材时，会自动生成并使用公开的几何占位企鹅，因此以上命令仍可直接运行。放入本地经典企鹅基准图后，再次执行 `pnpm assets:prepare` 即会切换为本地经典形象。
 
-## 状态映射
+也可以直接双击：
 
-| Codex 状态 | 小企鹅表现 |
-| --- | --- |
-| 空闲 | 待机、散步、随机小动作 |
-| 正在思考 | 看屏幕、翻书、敲键盘 |
-| 正在执行 | 忙碌工作或搬运小物件 |
-| 任务完成 | 跳跃、挥手或撒花 |
-| 执行失败 | 疑惑、短暂沮丧后恢复 |
-| 等待用户 | 举牌或轻轻敲窗提醒 |
+```text
+windows\Start-CodexPet.cmd
+```
 
-## 设计原则
+操作方式：
 
-1. **不打扰**：默认安静，不抢焦点，不遮挡主要工作区域。
-2. **有反馈**：宠物动作应准确反映 Codex 当前状态。
-3. **低占用**：控制内存、CPU 与电量消耗。
-4. **可关闭**：动画、音效、通知和开机启动都由用户决定。
-5. **可扩展**：状态、动作、皮肤与互动方式可以逐步增加。
+- 按住企鹅左键拖动。
+- 双击企鹅触发挥手。
+- 右键打开菜单，可暂停、演示动作、设置开机启动、隐藏或退出。
+- 隐藏后可从系统托盘重新显示。
 
-## 路线图
+## 本地角色素材
 
-### 第一阶段：活起来
+公开仓库只包含程序、图集生成器和无权利负担的占位图，不包含经典 QQ 企鹅素材。
 
-- 完成桌面透明窗口和基础动画系统
-- 实现宠物状态机与鼠标互动
-- 打通最小可用的 Codex 状态输入
+开发者需自行准备有权使用的透明 PNG，并放到：
 
-### 第二阶段：有性格
+```text
+.local-assets\qq-penguin\pixel-base.png
+```
 
-- 增加随机行为、情绪和连续工作反馈
-- 加入设置页、托盘菜单和装扮系统
-- 优化多显示器、高 DPI 与性能表现
+随后运行：
 
-### 第三阶段：会成长
+```powershell
+pnpm assets:build
+```
 
-- 探索好感度、收藏品和桌面小场景
-- 支持社区制作动作包与皮肤
-- 扩展到更多操作系统
+生成器会自动完成绿幕残留清理、主体裁剪、限色像素化、动作帧生成和 V2 图集组装。所有衍生素材继续留在 `.local-assets/`，不会被 Git 提交。
 
-## 开发方式
+## 安装到 Codex
 
-项目将采用 vibe coding 的方式快速迭代：先做出可运行、可感受的原型，再通过真实使用逐步确定技术栈和功能优先级。
+```powershell
+pnpm assets:install
+```
 
-在第一个技术原型确定前，本仓库不会过早绑定框架。选择方案时会重点比较：透明窗口能力、动画性能、安装包体积、Windows 兼容性以及与 Codex 的集成难度。
+存在本地经典企鹅素材时安装到：
 
-## 参与项目
+```text
+%CODEX_HOME%\pets\qq-penguin\
+```
 
-欢迎提交 Issue，分享你希望小企鹅拥有的动作、互动或使用场景。代码结构稳定后会补充本地开发与贡献指南。
+未设置 `CODEX_HOME` 时使用：
+
+```text
+%USERPROFILE%\.codex\pets\qq-penguin\
+```
+
+安装后进入 Codex 的 `Settings → Pets`，点击刷新并选择 `QQ Penguin`。运行时 ID 为 `custom:qq-penguin`。
+
+没有本地经典素材时会安装公开占位宠物到 `pets\codex-penguin-placeholder`，运行时 ID 为 `custom:codex-penguin-placeholder`。
+
+## Codex Pets V2 接口
+
+当前图集规格：
+
+- 图集：透明 PNG 或 WebP，`1536 × 2288`
+- 网格：8 列 × 11 行
+- 单帧：`192 × 208`
+- `pet.json` 必须显式设置 `"spriteVersionNumber": 2`
+
+| 行 | 动作 | 有效帧 |
+| --- | --- | ---: |
+| 0 | idle | 6 帧，另在第 7 格保留校验用中性帧 |
+| 1 | running-right | 8 |
+| 2 | running-left | 8 |
+| 3 | waving | 4 |
+| 4 | jumping | 5 |
+| 5 | failed | 8 |
+| 6 | waiting | 6 |
+| 7 | running / working | 6 |
+| 8 | review | 6 |
+| 9–10 | 16 个顺时针视线方向 | 每行 8 |
+
+完整契约见 [docs/codex-pet-contract.md](docs/codex-pet-contract.md)。
+
+## 状态桥接
+
+Windows 宠物读取：
+
+```text
+%USERPROFILE%\.codex-pet\state.json
+```
+
+可以用命令模拟状态：
+
+```powershell
+pnpm state running
+pnpm state waiting
+pnpm state jumping
+pnpm state failed
+pnpm state idle
+```
+
+状态文件格式：
+
+```json
+{
+  "state": "running",
+  "updatedAt": 1783950000000,
+  "source": "codex-notify"
+}
+```
+
+可用状态为：`idle`、`running-right`、`running-left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`。
+
+Codex 的 `notify` 可在每轮完成时调用 `scripts/codex-notify.mjs`，把结果映射为庆祝或失败动作。它不是完整的实时会话监听器；正在工作、等待输入等阶段仍通过状态桥接器或未来的 App Server 适配器提供。
+
+## 构建便携版
+
+```powershell
+pnpm build
+```
+
+输出：
+
+```text
+release\CodexPet-portable\
+release\Codex-Pet-0.1.0-portable.zip
+```
+
+便携版不编译或安装未签名程序，适合启用了严格 Windows 应用控制策略的电脑。
+
+## 项目结构
+
+```text
+src/                 Tauri/Web 前端状态机
+src-tauri/           Tauri 2 原生桌面壳（后续签名安装包）
+windows/             当前可运行的 PowerShell/WPF 桌面壳
+scripts/             图集生成、安装和状态桥接
+docs/                角色、接口与架构说明
+public/placeholder.svg 公开占位角色
+.local-assets/       本地第三方素材与衍生文件（Git 忽略）
+```
+
+```mermaid
+flowchart LR
+    C["Codex 状态 / notify"] --> B["状态桥接"]
+    M["手动演示命令"] --> B
+    B --> S["~/.codex-pet/state.json"]
+    S --> W["Windows 桌面宠物"]
+    A["本地像素基准图"] --> G["V2 图集生成器"]
+    G --> W
+    G --> P["Codex Settings → Pets"]
+```
+
+## 验证
+
+```powershell
+pnpm check
+pnpm smoke
+pnpm assets:validate
+pnpm build
+```
+
+`pnpm smoke` 会启动真实 WPF 窗口、渲染图集并保存本地截图后自动退出；`pnpm assets:validate` 使用当前 Codex 安装内置的官方校验器进行 V2 验证。
+
+官方校验命令额外要求已安装 Codex Windows App，以及可从命令行调用的 Python 3 和 Pillow；这些不是运行桌面宠物或构建便携版的必需项。
 
 ## 素材与版权
 
-本项目仅借鉴经典桌面宠物带来的体验和氛围，不会直接使用 QQ、腾讯或其他第三方拥有版权的角色形象、名称、动画及美术资源。最终企鹅形象与素材将采用原创或获得明确授权的内容。
+- 程序代码、接口文档与公开占位图不依赖 QQ 品牌素材。
+- 经典 QQ 企鹅参考图、像素重绘、动作图集和包含它们的本地便携包不会提交到公开仓库。
+- 对外发布含经典形象的截图、安装包或素材包前，应取得相关权利人的明确许可。
+- 贡献者不得提交未经授权的第三方角色素材。
 
 ## License
 
-许可证将在首个可运行版本发布前确定。在许可证明确之前，请勿将本仓库内容用于商业发行。
+代码许可证将在首个公开发行版前确定。在许可证明确之前，请勿将仓库内容或本地角色素材用于商业发行。
