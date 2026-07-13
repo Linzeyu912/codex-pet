@@ -1,0 +1,15 @@
+# Local copyrighted reference material and generated derivatives
+.local-assets/
+public/local/
+
+# Build output
+dist/
+release/
+target/
+node_modules/
+src-tauri/gen/
+
+# Local environment
+.env
+.env.*
+!.env.example
