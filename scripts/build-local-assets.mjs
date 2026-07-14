@@ -20,6 +20,9 @@ const BASELINE_Y = 188;
 const classicRoot = path.join(projectRoot, ".local-assets", "qq-penguin");
 const classicSourcePath = path.join(classicRoot, "pixel-base.png");
 const classicPoseSheetPath = path.join(classicRoot, "poses", "pose-sheet-v1.png");
+const coherentRunRoot = path.join(classicRoot, "coherent-v2-run");
+const coherentAtlasPath = path.join(coherentRunRoot, "final", "spritesheet-extended.webp");
+const coherentValidationPath = path.join(coherentRunRoot, "final", "validation-extended.json");
 const placeholderSourcePath = path.join(projectRoot, "public", "placeholder.svg");
 const publicRoot = path.join(projectRoot, "public", "local");
 
@@ -60,6 +63,45 @@ async function resolveSource() {
     manifest: placeholderManifest,
     usedPlaceholder: true,
   };
+}
+
+async function resolveValidatedCoherentAtlas() {
+  try {
+    await fs.access(coherentAtlasPath);
+    await fs.access(coherentValidationPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+
+  const validation = JSON.parse(await fs.readFile(coherentValidationPath, "utf8"));
+  const atlasStats = await fs.stat(coherentAtlasPath);
+  const validationStats = await fs.stat(coherentValidationPath);
+  const validationFile = path.resolve(validation.file ?? "").toLocaleLowerCase();
+  const expectedFile = path.resolve(coherentAtlasPath).toLocaleLowerCase();
+  const validationErrors = Array.isArray(validation.errors) ? validation.errors : ["missing errors array"];
+  const validationWarnings = Array.isArray(validation.warnings) ? validation.warnings : ["missing warnings array"];
+  if (
+    validation.ok !== true ||
+    validationFile !== expectedFile ||
+    validation.sprite_version_number !== 2 ||
+    validation.width !== ATLAS_WIDTH ||
+    validation.height !== ATLAS_HEIGHT ||
+    validationErrors.length > 0 ||
+    validationWarnings.length > 0 ||
+    validationStats.mtimeMs < atlasStats.mtimeMs
+  ) {
+    throw new Error(`The coherent V2 atlas exists but its validation did not pass: ${coherentValidationPath}`);
+  }
+
+  const metadata = await sharp(coherentAtlasPath).metadata();
+  if (metadata.width !== ATLAS_WIDTH || metadata.height !== ATLAS_HEIGHT) {
+    throw new Error(
+      `The coherent V2 atlas must be ${ATLAS_WIDTH}x${ATLAS_HEIGHT}, got ${metadata.width}x${metadata.height}.`,
+    );
+  }
+
+  return coherentAtlasPath;
 }
 
 function pixelOffset(x, y, width) {
@@ -580,21 +622,70 @@ function createFrameRows(poseFrames = null) {
 }
 
 export async function buildLocalAssets({ copyToPublic = true } = {}) {
-  const { sourcePath, outputRoot, manifest, usedPlaceholder } = await resolveSource();
+  const approvedCoherentAtlas =
+    process.env.CODEX_PET_FORCE_PLACEHOLDER === "1" ? null : await resolveValidatedCoherentAtlas();
+  const resolution = approvedCoherentAtlas
+    ? {
+        sourcePath: classicSourcePath,
+        outputRoot: path.join(classicRoot, "codex-pet"),
+        manifest: classicManifest,
+        usedPlaceholder: false,
+      }
+    : await resolveSource();
+  const { sourcePath, outputRoot, manifest, usedPlaceholder } = resolution;
   if (usedPlaceholder) {
     console.log("No local classic-penguin source found; building the rights-safe placeholder pet.");
   }
 
   await fs.mkdir(outputRoot, { recursive: true });
-  const base = await normalizeBase(sourcePath);
+  let base = null;
+  let normalizedPath = null;
+  try {
+    await fs.access(sourcePath);
+    base = await normalizeBase(sourcePath);
+    normalizedPath = path.join(outputRoot, "pixel-base-normalized.png");
+    await sharp(base.data, { raw: { width: base.width, height: base.height, channels: 4 } })
+      .png({ palette: true, colours: 24, dither: 0 })
+      .toFile(normalizedPath);
+  } catch (error) {
+    if (!approvedCoherentAtlas || error?.code !== "ENOENT") throw error;
+  }
+
+  if (approvedCoherentAtlas) {
+    const spritesheetPath = path.join(outputRoot, manifest.spritesheetPath);
+    const pngSpritesheetPath = path.join(outputRoot, "spritesheet.png");
+    await fs.copyFile(approvedCoherentAtlas, spritesheetPath);
+    await sharp(approvedCoherentAtlas).png({ palette: false, compressionLevel: 9 }).toFile(pngSpritesheetPath);
+    await fs.writeFile(path.join(outputRoot, "pet.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+    if (copyToPublic) {
+      await fs.mkdir(publicRoot, { recursive: true });
+      await fs.copyFile(spritesheetPath, path.join(publicRoot, "spritesheet.webp"));
+      await fs.copyFile(pngSpritesheetPath, path.join(publicRoot, "spritesheet.png"));
+      await fs.copyFile(path.join(outputRoot, "pet.json"), path.join(publicRoot, "pet.json"));
+    }
+
+    console.log(`Using validated coherent hatch-pet V2 atlas: ${approvedCoherentAtlas}`);
+    return {
+      built: true,
+      sourcePath,
+      atlasSourcePath: approvedCoherentAtlas,
+      outputRoot,
+      spritesheetPath,
+      pngSpritesheetPath,
+      normalizedPath,
+      petId: manifest.id,
+      usedPlaceholder,
+      usedCoherentAtlas: true,
+    };
+  }
+
+  if (!base) throw new Error(`A source image is required for fallback atlas generation: ${sourcePath}`);
+
   const poseFrames = usedPlaceholder ? null : await loadPoseFrames(classicPoseSheetPath);
   if (poseFrames) {
     console.log(`Using 16 local side/back/playful pose frames: ${classicPoseSheetPath}`);
   }
-  const normalizedPath = path.join(outputRoot, "pixel-base-normalized.png");
-  await sharp(base.data, { raw: { width: base.width, height: base.height, channels: 4 } })
-    .png({ palette: true, colours: 24, dither: 0 })
-    .toFile(normalizedPath);
 
   const atlas = Buffer.alloc(ATLAS_WIDTH * ATLAS_HEIGHT * 4);
   const rows = createFrameRows(poseFrames);
@@ -621,6 +712,7 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
     await fs.mkdir(publicRoot, { recursive: true });
     await fs.copyFile(spritesheetPath, path.join(publicRoot, "spritesheet.webp"));
     await fs.copyFile(pngSpritesheetPath, path.join(publicRoot, "spritesheet.png"));
+    await fs.copyFile(path.join(outputRoot, "pet.json"), path.join(publicRoot, "pet.json"));
   }
 
   console.log(`Built Codex Pet V2 atlas: ${spritesheetPath}`);
@@ -633,6 +725,7 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
     normalizedPath,
     petId: manifest.id,
     usedPlaceholder,
+    usedCoherentAtlas: false,
   };
 }
 

@@ -16,7 +16,8 @@
     "tauri": "tauri",
     "assets:build": "node scripts/build-local-assets.mjs",
     "assets:prepare": "node scripts/prepare-local-assets.mjs",
-    "assets:validate": "powershell -NoProfile -File windows/Validate-CodexAtlas.ps1",
+    "assets:validate": "pnpm assets:prepare && powershell -NoProfile -File windows/Validate-CodexAtlas.ps1",
+    "assets:continuity": "node scripts/check-animation-continuity.mjs",
     "assets:install": "node scripts/install-codex-pet.mjs",
     "state": "node scripts/set-state.mjs"
   },
