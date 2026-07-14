@@ -72,24 +72,24 @@ $bitmap.EndInit()
 $bitmap.Freeze()
 
 $animations = @{
-    'idle'          = @{ Row = 0; Frames = 6; Milliseconds = 300; Label = '陪着你' }
-    'running-right' = @{ Row = 1; Frames = 8; Milliseconds = 110; Label = '向右散步' }
-    'running-left'  = @{ Row = 2; Frames = 8; Milliseconds = 110; Label = '向左散步' }
-    'waving'        = @{ Row = 3; Frames = 4; Milliseconds = 140; Label = '你好呀'; Transient = 2800 }
-    'jumping'       = @{ Row = 4; Frames = 5; Milliseconds = 140; Label = '完成啦'; Transient = 2600 }
-    'failed'        = @{ Row = 5; Frames = 8; Milliseconds = 140; Label = '遇到问题了'; Transient = 4200 }
-    'waiting'       = @{ Row = 6; Frames = 6; Milliseconds = 150; Label = '等你确认' }
-    'running'       = @{ Row = 7; Frames = 6; Milliseconds = 120; Label = 'Codex 正在工作' }
-    'review'        = @{ Row = 8; Frames = 6; Milliseconds = 150; Label = '正在检查' }
-    'rolling'       = @{ Row = 5; Frames = 8; Milliseconds = 240; Label = '打个滚'; Transient = 3600 }
-    'lying'         = @{ Cells = @(@{ Column = 0; Row = 5 }, @{ Column = 1; Row = 5 }, @{ Column = 0; Row = 5 }, @{ Column = 1; Row = 5 }); Frames = 4; Milliseconds = 520; Label = '躺一会儿'; Transient = 5200 }
-    'mischief'      = @{ Cells = @(@{ Column = 0; Row = 6 }, @{ Column = 1; Row = 6 }, @{ Column = 2; Row = 6 }, @{ Column = 3; Row = 6 }, @{ Column = 4; Row = 6 }, @{ Column = 5; Row = 6 }); Frames = 6; Milliseconds = 320; Label = '嘿嘿'; Transient = 3600 }
+    'idle'          = @{ Row = 0; Frames = 6; Durations = @(280, 110, 110, 140, 140, 320); Label = '陪着你' }
+    'running-right' = @{ Row = 1; Frames = 8; Durations = @(120, 120, 120, 120, 120, 120, 120, 220); Label = '向右散步' }
+    'running-left'  = @{ Row = 2; Frames = 8; Durations = @(120, 120, 120, 120, 120, 120, 120, 220); Label = '向左散步' }
+    'waving'        = @{ Row = 3; Frames = 4; Durations = @(140, 140, 140, 280); Label = '你好呀'; Cycles = 4 }
+    'jumping'       = @{ Row = 4; Frames = 5; Durations = @(140, 140, 140, 140, 280); Label = '完成啦'; Cycles = 3 }
+    'failed'        = @{ Row = 5; Frames = 8; Durations = @(140, 140, 140, 140, 140, 140, 140, 240); Label = '遇到问题了'; Cycles = 3 }
+    'waiting'       = @{ Row = 6; Frames = 6; Durations = @(150, 150, 150, 150, 150, 260); Label = '等你确认' }
+    'running'       = @{ Row = 7; Frames = 6; Durations = @(120, 120, 120, 120, 120, 220); Label = 'Codex 正在工作' }
+    'review'        = @{ Row = 8; Frames = 6; Durations = @(150, 150, 150, 150, 150, 280); Label = '正在检查' }
+    'rolling'       = @{ Row = 5; Frames = 8; Durations = @(140, 140, 140, 140, 140, 140, 140, 240); Label = '摔倒又爬起'; Cycles = 1 }
+    'lying'         = @{ Cells = @(@{ Column = 0; Row = 5 }, @{ Column = 1; Row = 5 }, @{ Column = 2; Row = 5 }, @{ Column = 3; Row = 5 }, @{ Column = 4; Row = 5 }, @{ Column = 4; Row = 5 }, @{ Column = 4; Row = 5 }, @{ Column = 3; Row = 5 }, @{ Column = 2; Row = 5 }, @{ Column = 1; Row = 5 }, @{ Column = 0; Row = 5 }); Frames = 11; Durations = @(180, 160, 160, 180, 420, 900, 420, 180, 160, 160, 240); Label = '躺一会儿'; Cycles = 1 }
+    'mischief'      = @{ Cells = @(@{ Column = 0; Row = 5 }, @{ Column = 1; Row = 5 }, @{ Column = 2; Row = 5 }, @{ Column = 3; Row = 5 }, @{ Column = 2; Row = 5 }, @{ Column = 1; Row = 5 }, @{ Column = 0; Row = 5 }); Frames = 7; Durations = @(180, 150, 150, 360, 150, 150, 240); Label = '嘿嘿，装摔一下'; Cycles = 1 }
 }
 $lookCells = @()
 for ($lookIndex = 0; $lookIndex -lt 16; $lookIndex += 1) {
     $lookCells += @{ Column = $lookIndex % 8; Row = 9 + [Math]::Floor($lookIndex / 8) }
 }
-$animations['looking'] = @{ Cells = $lookCells; Frames = 16; Milliseconds = 170; Label = '四处看看'; Transient = 3200 }
+$animations['looking'] = @{ Cells = $lookCells; Frames = 16; Milliseconds = 170; Label = '四处看看'; Cycles = 1 }
 $demoOrder = @('idle', 'running-right', 'running-left', 'waving', 'jumping', 'looking', 'mischief', 'rolling', 'lying', 'failed', 'waiting', 'running', 'review')
 $autonomousActions = @(
     'running-right', 'running-right',
@@ -99,6 +99,7 @@ $autonomousActions = @(
 )
 $script:action = 'idle'
 $script:frame = 0
+$script:completedCycles = 0
 $script:paused = $false
 $script:autoRoam = $true
 $script:externalState = 'idle'
@@ -106,7 +107,6 @@ $script:lastFrameAt = [DateTime]::UtcNow
 $script:lastMotionAt = [DateTime]::UtcNow
 $script:lastPollAt = [DateTime]::MinValue
 $script:lastStateStamp = [long]0
-$script:transientAt = [DateTime]::MinValue
 $script:directionalActionEndsAt = [DateTime]::MinValue
 $script:nextAutoActionAt = [DateTime]::UtcNow.AddSeconds(2)
 $script:allowExit = $false
@@ -132,16 +132,25 @@ function Show-Frame {
     $petImage.Source = $crop
 }
 
+function Get-FrameDuration($definition, [int]$frame) {
+    if ($definition.ContainsKey('Durations')) {
+        return [int]$definition.Durations[$frame % $definition.Durations.Count]
+    }
+    return [int]$definition.Milliseconds
+}
+
 function Set-PetAction([string]$Action, [long]$Stamp = 0) {
     if (-not $animations.ContainsKey($Action)) { return }
     $changed = $script:action -ne $Action
     $newerState = $Stamp -gt $script:lastStateStamp
+    $restartFiniteAction = $animations[$Action].ContainsKey('Cycles')
     if ($changed) {
         $script:action = $Action
-        $script:frame = 0
     }
-    if ($changed -or $newerState -or $animations[$Action].ContainsKey('Transient')) {
-        $script:transientAt = [DateTime]::UtcNow
+    if ($changed -or $newerState -or $restartFiniteAction) {
+        $script:frame = 0
+        $script:completedCycles = 0
+        $script:lastFrameAt = [DateTime]::UtcNow
     }
     if ($Stamp -gt $script:lastStateStamp) { $script:lastStateStamp = $Stamp }
     $definition = $animations[$script:action]
@@ -329,9 +338,9 @@ $quickActions = [ordered]@{
     '挥挥手' = 'waving'
     '跳一下' = 'jumping'
     '四处张望' = 'looking'
-    '背身偷看' = 'mischief'
+    '装摔一下' = 'mischief'
     '躺一下' = 'lying'
-    '打个滚' = 'rolling'
+    '摔倒又爬起' = 'rolling'
 }
 foreach ($entry in $quickActions.GetEnumerator()) {
     $item = New-Object Windows.Controls.MenuItem
@@ -390,24 +399,28 @@ $timer.Add_Tick({
         $script:lastPollAt = $now
     }
     $definition = $animations[$script:action]
-    if (-not $script:paused -and ($now - $script:lastFrameAt).TotalMilliseconds -ge $definition.Milliseconds) {
-        $script:frame = ($script:frame + 1) % [int]$definition.Frames
-        $script:lastFrameAt = $now
-        Show-Frame
+    $frameDuration = Get-FrameDuration -definition $definition -frame $script:frame
+    if (-not $script:paused -and ($now - $script:lastFrameAt).TotalMilliseconds -ge $frameDuration) {
+        $nextFrame = ($script:frame + 1) % [int]$definition.Frames
+        $finishedCycle = $nextFrame -eq 0
+        if ($finishedCycle) { $script:completedCycles += 1 }
+        if ($finishedCycle -and $definition.ContainsKey('Cycles') -and
+            $script:completedCycles -ge [int]$definition.Cycles) {
+            if ($script:externalState -eq $script:action) { $script:externalState = 'idle' }
+            Set-PetAction -Action 'idle'
+            Schedule-NextAutoAction
+        } else {
+            $script:frame = $nextFrame
+            $script:lastFrameAt = $now
+            Show-Frame
+        }
     }
     Move-Pet -Now $now
     if ($script:action -in @('running-right', 'running-left') -and
         $script:directionalActionEndsAt -ne [DateTime]::MinValue -and
-        $now -ge $script:directionalActionEndsAt) {
+        $now -ge $script:directionalActionEndsAt -and $script:frame -eq 0) {
         $script:directionalActionEndsAt = [DateTime]::MinValue
         Set-PetAction -Action 'idle'
-        Schedule-NextAutoAction
-    }
-    if ($definition.ContainsKey('Transient') -and
-        ($now - $script:transientAt).TotalMilliseconds -gt [int]$definition.Transient) {
-        if ($script:externalState -eq $script:action) { $script:externalState = 'idle' }
-        Set-PetAction -Action 'idle'
-        $script:transientAt = [DateTime]::MinValue
         Schedule-NextAutoAction
     }
     if ($script:action -eq 'idle' -and $now -ge $script:nextAutoActionAt) {
