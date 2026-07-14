@@ -20,6 +20,10 @@ const validStates = new Set([
   "waiting",
   "running",
   "review",
+  "looking",
+  "rolling",
+  "lying",
+  "mischief",
 ]);
 
 const requested = (process.argv[2] || "idle").trim().toLowerCase();

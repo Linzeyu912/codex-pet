@@ -1,5 +1,7 @@
 ﻿param(
-    [switch]$Smoke
+    [switch]$Smoke,
+    [ValidateSet('idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'waiting', 'running', 'review', 'looking', 'rolling', 'lying', 'mischief')]
+    [string]$SmokeAction = 'idle'
 )
 
 Set-StrictMode -Version Latest
@@ -19,7 +21,8 @@ $statePath = Join-Path $stateDirectory 'state.json'
 $settingsDirectory = Join-Path $env:APPDATA 'Codex Pet'
 $windowStatePath = Join-Path $settingsDirectory 'window-state.json'
 $startupPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Codex Pet.lnk'
-$smokePath = Join-Path $projectRoot '.local-assets\qq-penguin\powershell-smoke.png'
+$smokeFileName = if ($SmokeAction -eq 'idle') { 'powershell-smoke.png' } else { "powershell-smoke-$SmokeAction.png" }
+$smokePath = Join-Path $projectRoot ".local-assets\qq-penguin\$smokeFileName"
 
 if (-not (Test-Path -LiteralPath $atlasPath)) {
     throw "Local sprite atlas not found: $atlasPath. Run 'pnpm assets:prepare' first."
@@ -69,32 +72,58 @@ $bitmap.EndInit()
 $bitmap.Freeze()
 
 $animations = @{
-    'idle'          = @{ Row = 0; Frames = 6; Milliseconds = 180; Label = '陪着你' }
-    'running-right' = @{ Row = 1; Frames = 8; Milliseconds = 120; Label = '向右散步' }
-    'running-left'  = @{ Row = 2; Frames = 8; Milliseconds = 120; Label = '向左散步' }
-    'waving'        = @{ Row = 3; Frames = 4; Milliseconds = 140; Label = '你好呀'; Transient = 2600 }
+    'idle'          = @{ Row = 0; Frames = 6; Milliseconds = 300; Label = '陪着你' }
+    'running-right' = @{ Row = 1; Frames = 8; Milliseconds = 110; Label = '向右散步' }
+    'running-left'  = @{ Row = 2; Frames = 8; Milliseconds = 110; Label = '向左散步' }
+    'waving'        = @{ Row = 3; Frames = 4; Milliseconds = 140; Label = '你好呀'; Transient = 2800 }
     'jumping'       = @{ Row = 4; Frames = 5; Milliseconds = 140; Label = '完成啦'; Transient = 2600 }
     'failed'        = @{ Row = 5; Frames = 8; Milliseconds = 140; Label = '遇到问题了'; Transient = 4200 }
     'waiting'       = @{ Row = 6; Frames = 6; Milliseconds = 150; Label = '等你确认' }
     'running'       = @{ Row = 7; Frames = 6; Milliseconds = 120; Label = 'Codex 正在工作' }
     'review'        = @{ Row = 8; Frames = 6; Milliseconds = 150; Label = '正在检查' }
+    'rolling'       = @{ Row = 5; Frames = 8; Milliseconds = 240; Label = '打个滚'; Transient = 3600 }
+    'lying'         = @{ Cells = @(@{ Column = 0; Row = 5 }, @{ Column = 1; Row = 5 }, @{ Column = 0; Row = 5 }, @{ Column = 1; Row = 5 }); Frames = 4; Milliseconds = 520; Label = '躺一会儿'; Transient = 5200 }
+    'mischief'      = @{ Cells = @(@{ Column = 0; Row = 6 }, @{ Column = 1; Row = 6 }, @{ Column = 2; Row = 6 }, @{ Column = 3; Row = 6 }, @{ Column = 4; Row = 6 }, @{ Column = 5; Row = 6 }); Frames = 6; Milliseconds = 320; Label = '嘿嘿'; Transient = 3600 }
 }
-$demoOrder = @('idle', 'running-right', 'running-left', 'waving', 'jumping', 'failed', 'waiting', 'running', 'review')
+$lookCells = @()
+for ($lookIndex = 0; $lookIndex -lt 16; $lookIndex += 1) {
+    $lookCells += @{ Column = $lookIndex % 8; Row = 9 + [Math]::Floor($lookIndex / 8) }
+}
+$animations['looking'] = @{ Cells = $lookCells; Frames = 16; Milliseconds = 170; Label = '四处看看'; Transient = 3200 }
+$demoOrder = @('idle', 'running-right', 'running-left', 'waving', 'jumping', 'looking', 'mischief', 'rolling', 'lying', 'failed', 'waiting', 'running', 'review')
+$autonomousActions = @(
+    'running-right', 'running-right',
+    'running-left', 'running-left',
+    'waving', 'jumping', 'looking', 'mischief', 'mischief',
+    'rolling', 'lying', 'idle'
+)
 $script:action = 'idle'
 $script:frame = 0
 $script:paused = $false
+$script:autoRoam = $true
+$script:externalState = 'idle'
 $script:lastFrameAt = [DateTime]::UtcNow
+$script:lastMotionAt = [DateTime]::UtcNow
 $script:lastPollAt = [DateTime]::MinValue
 $script:lastStateStamp = [long]0
 $script:transientAt = [DateTime]::MinValue
+$script:directionalActionEndsAt = [DateTime]::MinValue
+$script:nextAutoActionAt = [DateTime]::UtcNow.AddSeconds(2)
 $script:allowExit = $false
 $script:smokeTimer = $null
 
 function Show-Frame {
     $definition = $animations[$script:action]
+    $column = [int]$script:frame
+    $row = if ($definition.ContainsKey('Row')) { [int]$definition.Row } else { 0 }
+    if ($definition.ContainsKey('Cells')) {
+        $cell = $definition.Cells[$script:frame % $definition.Cells.Count]
+        $column = [int]$cell.Column
+        $row = [int]$cell.Row
+    }
     $rectangle = [Windows.Int32Rect]::new(
-        ([int]$script:frame * 192),
-        ([int]$definition.Row * 208),
+        ($column * 192),
+        ($row * 208),
         192,
         208
     )
@@ -105,9 +134,13 @@ function Show-Frame {
 
 function Set-PetAction([string]$Action, [long]$Stamp = 0) {
     if (-not $animations.ContainsKey($Action)) { return }
-    if ($script:action -ne $Action) {
+    $changed = $script:action -ne $Action
+    $newerState = $Stamp -gt $script:lastStateStamp
+    if ($changed) {
         $script:action = $Action
         $script:frame = 0
+    }
+    if ($changed -or $newerState -or $animations[$Action].ContainsKey('Transient')) {
         $script:transientAt = [DateTime]::UtcNow
     }
     if ($Stamp -gt $script:lastStateStamp) { $script:lastStateStamp = $Stamp }
@@ -120,7 +153,64 @@ function Set-PetAction([string]$Action, [long]$Stamp = 0) {
         'failed'  { $stateDot.Fill = [Windows.Media.Brushes]::Tomato }
         default   { $stateDot.Fill = [Windows.Media.Brushes]::MediumSeaGreen }
     }
+    if ($script:action -in @('waving', 'jumping', 'failed', 'waiting', 'looking', 'mischief', 'rolling', 'lying')) {
+        $bubble.Visibility = [Windows.Visibility]::Visible
+    } elseif (-not $root.IsMouseOver) {
+        $bubble.Visibility = [Windows.Visibility]::Collapsed
+    }
     Show-Frame
+}
+
+function Schedule-NextAutoAction(
+    [int]$MinimumMilliseconds = 1600,
+    [int]$MaximumMilliseconds = 4200
+) {
+    $delay = Get-Random -Minimum $MinimumMilliseconds -Maximum ($MaximumMilliseconds + 1)
+    $script:nextAutoActionAt = [DateTime]::UtcNow.AddMilliseconds($delay)
+}
+
+function Start-AutonomousAction {
+    if ($Smoke -or -not $script:autoRoam -or $script:paused -or $script:externalState -ne 'idle') { return }
+    $choice = Get-Random -InputObject $autonomousActions
+    $virtualLeft = [Windows.SystemParameters]::VirtualScreenLeft
+    $virtualRight = $virtualLeft + [Windows.SystemParameters]::VirtualScreenWidth
+    $center = $window.Left + ($window.Width / 2)
+    if ($choice -eq 'running-left' -and $center -lt ($virtualLeft + 220)) { $choice = 'running-right' }
+    if ($choice -eq 'running-right' -and $center -gt ($virtualRight - 220)) { $choice = 'running-left' }
+    Set-PetAction -Action $choice
+    if ($choice -in @('running-right', 'running-left')) {
+        $script:directionalActionEndsAt = [DateTime]::UtcNow.AddMilliseconds(5200)
+        $script:nextAutoActionAt = [DateTime]::MaxValue
+    } elseif ($choice -eq 'idle') {
+        Schedule-NextAutoAction
+    } else {
+        $script:directionalActionEndsAt = [DateTime]::MinValue
+        $script:nextAutoActionAt = [DateTime]::MaxValue
+    }
+}
+
+function Move-Pet([DateTime]$Now) {
+    $elapsed = ($Now - $script:lastMotionAt).TotalSeconds
+    $script:lastMotionAt = $Now
+    if ($Smoke -or $script:paused -or $script:action -notin @('running-right', 'running-left')) { return }
+
+    $virtualLeft = [Windows.SystemParameters]::VirtualScreenLeft + 12
+    $virtualRight = [Windows.SystemParameters]::VirtualScreenLeft + [Windows.SystemParameters]::VirtualScreenWidth - $window.Width - 12
+    $direction = if ($script:action -eq 'running-right') { 1 } else { -1 }
+    $distance = [Math]::Min(7, [Math]::Max(0.5, $elapsed * 72))
+    $nextLeft = $window.Left + ($direction * $distance)
+
+    if ($nextLeft -ge $virtualRight) {
+        $window.Left = $virtualRight
+        if ($script:externalState -eq 'running-right') { $script:externalState = 'running-left' }
+        Set-PetAction -Action 'running-left'
+    } elseif ($nextLeft -le $virtualLeft) {
+        $window.Left = $virtualLeft
+        if ($script:externalState -eq 'running-left') { $script:externalState = 'running-right' }
+        Set-PetAction -Action 'running-right'
+    } else {
+        $window.Left = $nextLeft
+    }
 }
 
 function Read-PetState {
@@ -129,7 +219,16 @@ function Read-PetState {
         $payload = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
         $stamp = [long]$payload.updatedAt
         if ($stamp -gt $script:lastStateStamp) {
-            Set-PetAction -Action ([string]$payload.state) -Stamp $stamp
+            $state = [string]$payload.state
+            if (-not $animations.ContainsKey($state)) { return }
+            $script:externalState = $state
+            $script:directionalActionEndsAt = [DateTime]::MinValue
+            Set-PetAction -Action $state -Stamp $stamp
+            if ($state -eq 'idle') {
+                Schedule-NextAutoAction
+            } else {
+                $script:nextAutoActionAt = [DateTime]::MaxValue
+            }
         }
     } catch {
         # Ignore a partially written or unknown state update.
@@ -185,6 +284,12 @@ $pauseItem = New-Object Windows.Controls.MenuItem
 $pauseItem.Header = '暂停动画'
 $demoItem = New-Object Windows.Controls.MenuItem
 $demoItem.Header = '演示下一个动作'
+$autoRoamItem = New-Object Windows.Controls.MenuItem
+$autoRoamItem.Header = '自动闲逛'
+$autoRoamItem.IsCheckable = $true
+$autoRoamItem.IsChecked = $true
+$actionsItem = New-Object Windows.Controls.MenuItem
+$actionsItem.Header = '立即动作'
 $autostartItem = New-Object Windows.Controls.MenuItem
 $autostartItem.Header = '开机自动启动'
 $autostartItem.IsCheckable = $true
@@ -200,13 +305,58 @@ $pauseItem.Add_Click({
 })
 $demoItem.Add_Click({
     $index = [Array]::IndexOf($demoOrder, $script:action)
-    Set-PetAction -Action $demoOrder[(($index + 1) % $demoOrder.Count)]
+    $script:externalState = 'idle'
+    $nextAction = $demoOrder[(($index + 1) % $demoOrder.Count)]
+    Set-PetAction -Action $nextAction
+    $script:directionalActionEndsAt = if ($nextAction -in @('running-right', 'running-left')) {
+        [DateTime]::UtcNow.AddMilliseconds(5200)
+    } else {
+        [DateTime]::MinValue
+    }
 })
+$autoRoamItem.Add_Click({
+    $script:autoRoam = $autoRoamItem.IsChecked
+    $script:externalState = 'idle'
+    if ($script:autoRoam) {
+        $script:directionalActionEndsAt = [DateTime]::MinValue
+        Set-PetAction -Action 'idle'
+        Schedule-NextAutoAction -MinimumMilliseconds 400 -MaximumMilliseconds 1000
+    }
+})
+$quickActions = [ordered]@{
+    '向左散步' = 'running-left'
+    '向右散步' = 'running-right'
+    '挥挥手' = 'waving'
+    '跳一下' = 'jumping'
+    '四处张望' = 'looking'
+    '背身偷看' = 'mischief'
+    '躺一下' = 'lying'
+    '打个滚' = 'rolling'
+}
+foreach ($entry in $quickActions.GetEnumerator()) {
+    $item = New-Object Windows.Controls.MenuItem
+    $item.Header = $entry.Key
+    $item.Tag = $entry.Value
+    $item.Add_Click({
+        param($sender, $eventArgs)
+        $script:externalState = 'idle'
+        $requestedAction = [string]$sender.Tag
+        Set-PetAction -Action $requestedAction
+        $script:directionalActionEndsAt = if ($requestedAction -in @('running-right', 'running-left')) {
+            [DateTime]::UtcNow.AddMilliseconds(5200)
+        } else {
+            [DateTime]::MinValue
+        }
+    })
+    [void]$actionsItem.Items.Add($item)
+}
 $autostartItem.Add_Click({ Set-Autostart -Enabled $autostartItem.IsChecked })
 $hideItem.Add_Click({ $window.Hide() })
 $exitItem.Add_Click({ $script:allowExit = $true; $window.Close() })
 
 [void]$contextMenu.Items.Add($pauseItem)
+[void]$contextMenu.Items.Add($autoRoamItem)
+[void]$contextMenu.Items.Add($actionsItem)
 [void]$contextMenu.Items.Add($demoItem)
 [void]$contextMenu.Items.Add($autostartItem)
 [void]$contextMenu.Items.Add((New-Object Windows.Controls.Separator))
@@ -217,6 +367,8 @@ $root.ContextMenu = $contextMenu
 $root.Add_MouseLeftButtonDown({
     param($sender, $eventArgs)
     if ($eventArgs.ClickCount -ge 2) {
+        $script:externalState = 'idle'
+        $script:directionalActionEndsAt = [DateTime]::MinValue
         Set-PetAction -Action 'waving'
         return
     }
@@ -224,7 +376,7 @@ $root.Add_MouseLeftButtonDown({
 })
 $root.Add_MouseEnter({ $bubble.Visibility = [Windows.Visibility]::Visible })
 $root.Add_MouseLeave({
-    if ($script:action -notin @('waiting', 'failed', 'jumping')) {
+    if ($script:action -notin @('waiting', 'failed', 'jumping', 'waving', 'looking', 'mischief', 'rolling', 'lying')) {
         $bubble.Visibility = [Windows.Visibility]::Collapsed
     }
 })
@@ -233,7 +385,7 @@ $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(33)
 $timer.Add_Tick({
     $now = [DateTime]::UtcNow
-    if (($now - $script:lastPollAt).TotalMilliseconds -ge 600) {
+    if (-not $Smoke -and ($now - $script:lastPollAt).TotalMilliseconds -ge 600) {
         Read-PetState
         $script:lastPollAt = $now
     }
@@ -243,10 +395,23 @@ $timer.Add_Tick({
         $script:lastFrameAt = $now
         Show-Frame
     }
+    Move-Pet -Now $now
+    if ($script:action -in @('running-right', 'running-left') -and
+        $script:directionalActionEndsAt -ne [DateTime]::MinValue -and
+        $now -ge $script:directionalActionEndsAt) {
+        $script:directionalActionEndsAt = [DateTime]::MinValue
+        Set-PetAction -Action 'idle'
+        Schedule-NextAutoAction
+    }
     if ($definition.ContainsKey('Transient') -and
         ($now - $script:transientAt).TotalMilliseconds -gt [int]$definition.Transient) {
+        if ($script:externalState -eq $script:action) { $script:externalState = 'idle' }
         Set-PetAction -Action 'idle'
         $script:transientAt = [DateTime]::MinValue
+        Schedule-NextAutoAction
+    }
+    if ($script:action -eq 'idle' -and $now -ge $script:nextAutoActionAt) {
+        Start-AutonomousAction
     }
 })
 
@@ -267,7 +432,9 @@ if (-not $Smoke) {
 
 $window.Add_SourceInitialized({ Restore-WindowPosition })
 $window.Add_Loaded({
-    Set-PetAction -Action 'idle'
+    $initialAction = if ($Smoke) { $SmokeAction } else { 'idle' }
+    Set-PetAction -Action $initialAction
+    if (-not $Smoke) { Schedule-NextAutoAction -MinimumMilliseconds 800 -MaximumMilliseconds 1800 }
     $timer.Start()
     if ($Smoke) {
         $bubble.Visibility = [Windows.Visibility]::Visible

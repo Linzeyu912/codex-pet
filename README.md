@@ -17,7 +17,9 @@ Codex Pet 把 Codex 的工作、等待、完成和失败状态变成桌面宠物
 - [x] 通过当前 Codex 官方图集校验器（零错误、零警告）
 - [x] 安装到本机 Codex Pets 目录
 - [x] Windows 透明置顶桌面宠物
-- [x] 拖动、位置记忆、右键菜单、托盘与开机启动
+- [x] 自动左右巡游、碰边转向、随机闲逛动作
+- [x] 正面、侧面、背面、躺下与打滚像素关键帧
+- [x] 拖动、位置记忆、动作菜单、托盘与开机启动
 - [x] Codex 状态文件桥接与动作演示
 - [x] 可直接运行的 Windows 便携包
 - [ ] 自动观察现有 Codex 桌面任务的全部实时阶段
@@ -45,7 +47,9 @@ windows\Start-CodexPet.cmd
 
 - 按住企鹅左键拖动。
 - 双击企鹅触发挥手。
-- 右键打开菜单，可暂停、演示动作、设置开机启动、隐藏或退出。
+- 放着不管时会自动左右散步、回头偷看、张望、跳跃、躺下或打滚，碰到屏幕边缘会转向。
+- 右键打开菜单，可开关自动闲逛，并立即指定侧身跑、背身偷看、躺下、打滚等动作。
+- 右键菜单也可暂停动画、设置开机启动、隐藏或退出。
 - 隐藏后可从系统托盘重新显示。
 
 ## 本地角色素材
@@ -57,6 +61,14 @@ windows\Start-CodexPet.cmd
 ```text
 .local-assets\qq-penguin\pixel-base.png
 ```
+
+可选的 `4 × 4` 多姿态像素表可放到：
+
+```text
+.local-assets\qq-penguin\poses\pose-sheet-v1.png
+```
+
+四行依次用于左侧身跑、右侧身跑、背面/回头姿态和躺下/打滚姿态。缺少该文件时仍会从正面基准图生成兼容动作。
 
 随后运行：
 
@@ -140,7 +152,7 @@ pnpm state idle
 }
 ```
 
-可用状态为：`idle`、`running-right`、`running-left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`。
+标准 Codex 状态为：`idle`、`running-right`、`running-left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`。独立桌面版另外支持：`looking`、`mischief`、`lying`、`rolling`。
 
 Codex 的 `notify` 可在每轮完成时调用 `scripts/codex-notify.mjs`，把结果映射为庆祝或失败动作。它不是完整的实时会话监听器；正在工作、等待输入等阶段仍通过状态桥接器或未来的 App Server 适配器提供。
 
