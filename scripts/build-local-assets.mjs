@@ -19,6 +19,7 @@ const BASELINE_Y = 188;
 
 const classicRoot = path.join(projectRoot, ".local-assets", "qq-penguin");
 const classicSourcePath = path.join(classicRoot, "pixel-base.png");
+const classicPoseSheetPath = path.join(classicRoot, "poses", "pose-sheet-v1.png");
 const placeholderSourcePath = path.join(projectRoot, "public", "placeholder.svg");
 const publicRoot = path.join(projectRoot, "public", "local");
 
@@ -187,6 +188,93 @@ async function normalizeBase(inputPath) {
   return { data: normalized, width: info.width, height: info.height };
 }
 
+async function normalizePoseCell(sheetData, sheetWidth, sheetHeight, cell) {
+  const { data: extracted, info } = await sharp(sheetData, {
+    raw: { width: sheetWidth, height: sheetHeight, channels: 4 },
+  })
+    .extract(cell)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const cleaned = Buffer.from(extracted);
+  let minX = info.width;
+  let minY = info.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const offset = pixelOffset(x, y, info.width);
+      const alpha = cleaned[offset + 3];
+      if (alpha < 128 || isGreenKey(cleaned[offset], cleaned[offset + 1], cleaned[offset + 2])) {
+        clearPixel(cleaned, offset);
+        continue;
+      }
+      cleaned[offset + 3] = 255;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    throw new Error("A pose-sheet cell did not contain a visible penguin.");
+  }
+
+  const cropWidth = maxX - minX + 1;
+  const cropHeight = maxY - minY + 1;
+  const scale = Math.min(BASE_WIDTH / cropWidth, BASE_HEIGHT / cropHeight);
+  const targetWidth = Math.max(2, Math.round((cropWidth * scale) / 2) * 2);
+  const targetHeight = Math.max(2, Math.round((cropHeight * scale) / 2) * 2);
+  const quantized = await sharp(cleaned, {
+    raw: { width: info.width, height: info.height, channels: 4 },
+  })
+    .extract({ left: minX, top: minY, width: cropWidth, height: cropHeight })
+    .resize(targetWidth, targetHeight, { fit: "fill", kernel: sharp.kernel.nearest })
+    .png({ palette: true, colours: 28, dither: 0 })
+    .toBuffer();
+  const { data, info: poseInfo } = await sharp(quantized)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const normalized = Buffer.from(data);
+  for (let offset = 0; offset < normalized.length; offset += 4) {
+    if (normalized[offset + 3] === 0) clearPixel(normalized, offset);
+  }
+  return { data: normalized, width: poseInfo.width, height: poseInfo.height };
+}
+
+async function loadPoseFrames(inputPath) {
+  try {
+    await fs.access(inputPath);
+  } catch {
+    return null;
+  }
+
+  const { data, info } = await sharp(inputPath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const poses = [];
+  for (let row = 0; row < 4; row += 1) {
+    for (let column = 0; column < 4; column += 1) {
+      const left = Math.round((column * info.width) / 4);
+      const top = Math.round((row * info.height) / 4);
+      const right = Math.round(((column + 1) * info.width) / 4);
+      const bottom = Math.round(((row + 1) * info.height) / 4);
+      poses.push(
+        await normalizePoseCell(data, info.width, info.height, {
+          left,
+          top,
+          width: right - left,
+          height: bottom - top,
+        }),
+      );
+    }
+  }
+  return poses;
+}
+
 function resizeNearest(source, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const output = Buffer.alloc(targetWidth * targetHeight * 4);
   for (let y = 0; y < targetHeight; y += 1) {
@@ -328,9 +416,10 @@ function raiseRightWing(source, width, height, angleDegrees) {
 }
 
 function makeFrame(base, spec = {}) {
-  let data = Buffer.from(base.data);
-  let width = base.width;
-  let height = base.height;
+  const source = spec.source ?? base;
+  let data = Buffer.from(source.data);
+  let width = source.width;
+  let height = source.height;
 
   if (spec.pupilDx || spec.pupilDy) {
     data = movePupils(data, width, height, spec.pupilDx ?? 0, spec.pupilDy ?? 0);
@@ -377,16 +466,8 @@ function compositeFrame(atlas, frame, column, row) {
   }
 }
 
-function createFrameRows() {
-  const idle = [
-    {},
-    { scaleY: 0.99 },
-    { scaleX: 1.01, scaleY: 0.975 },
-    { scaleY: 0.99 },
-    {},
-    { blink: true },
-  ];
-  const runningRight = [
+function createFrameRows(poseFrames = null) {
+  const fallbackRunningRight = [
     { shear: 2, dy: 0 },
     { shear: 4, dx: 2, dy: 2, scaleY: 0.97 },
     { shear: 5, dx: 4, dy: -2, scaleY: 1.02 },
@@ -396,52 +477,84 @@ function createFrameRows() {
     { shear: 5, dx: 4, dy: -2, scaleY: 1.02 },
     { shear: 3, dx: 2, dy: 0 },
   ];
-  const runningLeft = runningRight.map((frame) => ({
+  const fallbackRunningLeft = fallbackRunningRight.map((frame) => ({
     ...frame,
     flip: true,
     dx: -(frame.dx ?? 0),
     shear: -(frame.shear ?? 0),
   }));
+  const idle = poseFrames
+    ? [{}, { halfBlink: true }, { source: poseFrames[9] }, { source: poseFrames[10] }, {}, { blink: true }]
+    : [
+        {},
+        { scaleY: 0.99 },
+        { scaleX: 1.01, scaleY: 0.975 },
+        { scaleY: 0.99 },
+        {},
+        { blink: true },
+      ];
+  const runningRight = poseFrames
+    ? [4, 5, 6, 7, 4, 5, 6, 7].map((index) => ({ source: poseFrames[index] }))
+    : fallbackRunningRight;
+  const runningLeft = poseFrames
+    ? [0, 1, 2, 3, 0, 1, 2, 3].map((index) => ({ source: poseFrames[index] }))
+    : fallbackRunningLeft;
   const waving = [
     {},
-    { wingAngle: -28, dy: -2 },
-    { wingAngle: -62, dy: -4 },
-    { wingAngle: -28, dy: -2 },
+    { wingAngle: -40, dy: -2 },
+    { wingAngle: -88, dy: -5 },
+    { wingAngle: -40, dy: -2 },
   ];
-  const jumping = [
-    { dy: 4, scaleX: 1.06, scaleY: 0.94 },
-    { dy: -10, scaleX: 1.01, scaleY: 1.01 },
-    { dy: -24, scaleX: 0.98, scaleY: 1.03 },
-    { dy: -10, scaleX: 1.01, scaleY: 1.01 },
-    { dy: 4, scaleX: 1.06, scaleY: 0.94 },
-  ];
-  const failed = [0, -2, 2, -2, 0, 2, -2, 0].map((dx, index) => ({
-    dx,
-    dy: [2, 3, 4, 5, 6, 5, 4, 3][index],
-    scaleY: 0.97,
-    halfBlink: true,
-  }));
-  const waiting = [
-    { pupilDx: -2 },
-    {},
-    { pupilDx: 2 },
-    {},
-    { dy: -2, scaleY: 1.01 },
-    { blink: true },
-  ];
-  const working = [
-    { pupilDy: 2 },
-    { pupilDy: 2, dy: -2 },
-    { pupilDy: 2 },
-    { pupilDy: 2, dy: -2 },
-    { pupilDy: 2 },
-    { pupilDy: 2 },
-  ];
-  const review = [-2, 0, 2, 2, 0, -2].map((pupilDx, index) => ({
-    pupilDx,
-    pupilDy: index === 2 || index === 3 ? 1 : 0,
-    dy: index === 2 || index === 3 ? 2 : 0,
-  }));
+  const jumping = poseFrames
+    ? [
+        { source: poseFrames[11] },
+        { dy: -10, scaleX: 1.01, scaleY: 1.01 },
+        { dy: -28, scaleX: 0.98, scaleY: 1.03 },
+        { dy: -10, scaleX: 1.01, scaleY: 1.01 },
+        { source: poseFrames[15] },
+      ]
+    : [
+        { dy: 4, scaleX: 1.06, scaleY: 0.94 },
+        { dy: -10, scaleX: 1.01, scaleY: 1.01 },
+        { dy: -24, scaleX: 0.98, scaleY: 1.03 },
+        { dy: -10, scaleX: 1.01, scaleY: 1.01 },
+        { dy: 4, scaleX: 1.06, scaleY: 0.94 },
+      ];
+  const failed = poseFrames
+    ? [12, 13, 14, 13, 12, 13, 14, 15].map((index) => ({ source: poseFrames[index] }))
+    : [0, -2, 2, -2, 0, 2, -2, 0].map((dx, index) => ({
+        dx,
+        dy: [2, 3, 4, 5, 6, 5, 4, 3][index],
+        scaleY: 0.97,
+        halfBlink: true,
+      }));
+  const waiting = poseFrames
+    ? [8, 9, 8, 10, 11, 10].map((index) => ({ source: poseFrames[index] }))
+    : [
+        { pupilDx: -2 },
+        {},
+        { pupilDx: 2 },
+        {},
+        { dy: -2, scaleY: 1.01 },
+        { blink: true },
+      ];
+  const working = poseFrames
+    ? [4, 5, 6, 7, 6, 5].map((index) => ({ source: poseFrames[index] }))
+    : [
+        { pupilDy: 2 },
+        { pupilDy: 2, dy: -2 },
+        { pupilDy: 2 },
+        { pupilDy: 2, dy: -2 },
+        { pupilDy: 2 },
+        { pupilDy: 2 },
+      ];
+  const review = poseFrames
+    ? [9, 8, 10, 9, 10, 8].map((index) => ({ source: poseFrames[index] }))
+    : [-2, 0, 2, 2, 0, -2].map((pupilDx, index) => ({
+        pupilDx,
+        pupilDy: index === 2 || index === 3 ? 1 : 0,
+        dy: index === 2 || index === 3 ? 2 : 0,
+      }));
   const lookAngles = Array.from({ length: 16 }, (_, index) => index * 22.5);
   const looks = lookAngles.map((degrees) => {
     const radians = (degrees * Math.PI) / 180;
@@ -474,13 +587,17 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
 
   await fs.mkdir(outputRoot, { recursive: true });
   const base = await normalizeBase(sourcePath);
+  const poseFrames = usedPlaceholder ? null : await loadPoseFrames(classicPoseSheetPath);
+  if (poseFrames) {
+    console.log(`Using 16 local side/back/playful pose frames: ${classicPoseSheetPath}`);
+  }
   const normalizedPath = path.join(outputRoot, "pixel-base-normalized.png");
   await sharp(base.data, { raw: { width: base.width, height: base.height, channels: 4 } })
     .png({ palette: true, colours: 24, dither: 0 })
     .toFile(normalizedPath);
 
   const atlas = Buffer.alloc(ATLAS_WIDTH * ATLAS_HEIGHT * 4);
-  const rows = createFrameRows();
+  const rows = createFrameRows(poseFrames);
   rows.forEach((rowFrames, row) => {
     rowFrames.forEach((spec, column) => compositeFrame(atlas, makeFrame(base, spec), column, row));
   });
