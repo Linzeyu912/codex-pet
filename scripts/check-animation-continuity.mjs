@@ -1,11 +1,46 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import sharp from "sharp";
+import {
+  auditDesktopActionPlaybacks,
+  desktopPoseActionPlaybacks,
+  inspectDesktopPoseAtlas,
+} from "./lib/pose-atlas-quality.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDir, "..");
-const inputPath = path.resolve(process.argv[2] ?? path.join(projectRoot, "public", "local", "spritesheet.png"));
+const cliArgs = process.argv.slice(2);
+let reportPath = null;
+let explicitPoseAtlasPath = null;
+const positionalInputs = [];
+for (let index = 0; index < cliArgs.length; index += 1) {
+  const argument = cliArgs[index];
+  if (argument === "--report" || argument === "--pose-atlas") {
+    const value = cliArgs[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${argument} requires a path.`);
+    if (argument === "--report") reportPath = path.resolve(value);
+    else explicitPoseAtlasPath = path.resolve(value);
+    index += 1;
+  } else if (argument.startsWith("--")) {
+    throw new Error(`Unknown option: ${argument}`);
+  } else {
+    positionalInputs.push(argument);
+  }
+}
+if (positionalInputs.length > 1) throw new Error("Only one spritesheet path may be provided.");
+const inputPath = path.resolve(
+  positionalInputs[0] ?? path.join(projectRoot, "public", "local", "spritesheet.png"),
+);
+const automaticPoseAtlasPath = path.join(path.dirname(inputPath), "desktop-poses.png");
+let poseAtlasPath = explicitPoseAtlasPath ?? automaticPoseAtlasPath;
+try {
+  await fs.access(poseAtlasPath);
+} catch (error) {
+  if (explicitPoseAtlasPath || error?.code !== "ENOENT") throw error;
+  poseAtlasPath = null;
+}
 let placeholderProfile = false;
 try {
   const manifest = JSON.parse(await fs.readFile(path.join(path.dirname(inputPath), "pet.json"), "utf8"));
@@ -19,6 +54,7 @@ const CELL_HEIGHT = 208;
 const ATLAS_WIDTH = CELL_WIDTH * 8;
 const ATLAS_HEIGHT = CELL_HEIGHT * 11;
 const ALPHA_THRESHOLD = 8;
+const COMPONENT_ALPHA_THRESHOLD = 8;
 const rows = [
   { name: "idle", frames: 6, cyclic: true, maxCenter: 8, minIou: 0.72, maxBaseline: 6 },
   { name: "running-right", frames: 8, cyclic: true, maxCenter: 15, minIou: 0.42, maxBaseline: 10 },
@@ -56,6 +92,98 @@ if (info.width !== ATLAS_WIDTH || info.height !== ATLAS_HEIGHT) {
   throw new Error(`Expected ${ATLAS_WIDTH}x${ATLAS_HEIGHT}, got ${info.width}x${info.height}: ${inputPath}`);
 }
 
+function analyzeComponents(alpha) {
+  const labels = new Int32Array(alpha.length);
+  const queue = new Int32Array(alpha.length);
+  const components = [];
+  let componentId = 0;
+
+  for (let start = 0; start < alpha.length; start += 1) {
+    if (alpha[start] <= COMPONENT_ALPHA_THRESHOLD || labels[start] !== 0) continue;
+    componentId += 1;
+    let head = 0;
+    let tail = 0;
+    let minX = CELL_WIDTH;
+    let minY = CELL_HEIGHT;
+    let maxX = -1;
+    let maxY = -1;
+    let maxAlpha = 0;
+    const pixels = [];
+    queue[tail++] = start;
+    labels[start] = componentId;
+    while (head < tail) {
+      const current = queue[head++];
+      const x = current % CELL_WIDTH;
+      const y = Math.floor(current / CELL_WIDTH);
+      pixels.push(current);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      maxAlpha = Math.max(maxAlpha, alpha[current]);
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const nextX = x + dx;
+          const nextY = y + dy;
+          if (nextX < 0 || nextY < 0 || nextX >= CELL_WIDTH || nextY >= CELL_HEIGHT) continue;
+          const next = nextY * CELL_WIDTH + nextX;
+          if (alpha[next] <= COMPONENT_ALPHA_THRESHOLD || labels[next] !== 0) continue;
+          labels[next] = componentId;
+          queue[tail++] = next;
+        }
+      }
+    }
+    components.push({ area: pixels.length, minX, minY, maxX, maxY, maxAlpha, pixels });
+  }
+
+  components.sort((first, second) => second.area - first.area);
+  const main = components[0];
+  if (!main) return { main: null, detached: [] };
+  const mainMask = new Uint8Array(alpha.length);
+  main.pixels.forEach((pixel) => {
+    mainMask[pixel] = 1;
+  });
+  const detached = components.slice(1).map((component) => {
+    let distance = Math.max(CELL_WIDTH, CELL_HEIGHT);
+    for (const pixel of component.pixels) {
+      const x = pixel % CELL_WIDTH;
+      const y = Math.floor(pixel / CELL_WIDTH);
+      const maxRadius = Math.min(distance - 1, Math.max(CELL_WIDTH, CELL_HEIGHT));
+      for (let radius = 1; radius <= maxRadius; radius += 1) {
+        let found = false;
+        for (let dy = -radius; dy <= radius && !found; dy += 1) {
+          for (let dx = -radius; dx <= radius; dx += 1) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+            const nextX = x + dx;
+            const nextY = y + dy;
+            if (nextX < 0 || nextY < 0 || nextX >= CELL_WIDTH || nextY >= CELL_HEIGHT) continue;
+            if (mainMask[nextY * CELL_WIDTH + nextX]) {
+              distance = radius;
+              found = true;
+              break;
+            }
+          }
+        }
+        if (found) break;
+      }
+    }
+    const nearGround = component.minY >= main.maxY - 28;
+    const plausibleFoot = component.area >= 16 && nearGround && distance <= 5;
+    return {
+      area: component.area,
+      bbox: [component.minX, component.minY, component.maxX, component.maxY],
+      maxAlpha: component.maxAlpha,
+      distanceFromMain: distance,
+      plausibleFoot,
+    };
+  });
+  return {
+    main: { area: main.area, bbox: [main.minX, main.minY, main.maxX, main.maxY], maxAlpha: main.maxAlpha },
+    detached,
+  };
+}
+
 function readFrame(row, column) {
   const alpha = new Uint8Array(CELL_WIDTH * CELL_HEIGHT);
   const premultipliedRgb = new Uint8Array(CELL_WIDTH * CELL_HEIGHT * 3);
@@ -89,7 +217,10 @@ function readFrame(row, column) {
     }
   }
 
-  if (area === 0) return { alpha, premultipliedRgb, area: 0, centerX: 0, centerY: 0, baseline: -1 };
+  const componentAnalysis = analyzeComponents(alpha);
+  if (area === 0) {
+    return { alpha, premultipliedRgb, area: 0, centerX: 0, centerY: 0, baseline: -1, componentAnalysis };
+  }
   return {
     alpha,
     premultipliedRgb,
@@ -99,6 +230,10 @@ function readFrame(row, column) {
     baseline: maxY,
     width: maxX - minX + 1,
     height: maxY - minY + 1,
+    top: minY,
+    left: minX,
+    right: maxX,
+    componentAnalysis,
   };
 }
 
@@ -106,6 +241,7 @@ function compare(first, second) {
   let intersection = 0;
   let union = 0;
   let colorDifference = 0;
+  let changedPixels = 0;
   for (let index = 0; index < first.alpha.length; index += 1) {
     const a = first.alpha[index] > ALPHA_THRESHOLD;
     const b = second.alpha[index] > ALPHA_THRESHOLD;
@@ -116,6 +252,14 @@ function compare(first, second) {
       colorDifference += Math.abs(first.premultipliedRgb[colorOffset] - second.premultipliedRgb[colorOffset]);
       colorDifference += Math.abs(first.premultipliedRgb[colorOffset + 1] - second.premultipliedRgb[colorOffset + 1]);
       colorDifference += Math.abs(first.premultipliedRgb[colorOffset + 2] - second.premultipliedRgb[colorOffset + 2]);
+      if (
+        Math.abs(first.premultipliedRgb[colorOffset] - second.premultipliedRgb[colorOffset]) +
+          Math.abs(first.premultipliedRgb[colorOffset + 1] - second.premultipliedRgb[colorOffset + 1]) +
+          Math.abs(first.premultipliedRgb[colorOffset + 2] - second.premultipliedRgb[colorOffset + 2]) >=
+        24
+      ) {
+        changedPixels += 1;
+      }
     }
   }
   return {
@@ -124,12 +268,20 @@ function compare(first, second) {
     baseline: Math.abs(first.baseline - second.baseline),
     areaRatio: Math.max(first.area, second.area) / Math.max(1, Math.min(first.area, second.area)),
     colorChange: union === 0 ? 0 : colorDifference / (union * 3 * 255),
+    changedPixels,
   };
 }
 
 const errors = [];
+const warnings = [];
 const summaries = [];
 const frameRows = [];
+const componentFindings = [];
+let desktopPoseInspection = null;
+if (poseAtlasPath) {
+  desktopPoseInspection = await inspectDesktopPoseAtlas(poseAtlasPath);
+  errors.push(...desktopPoseInspection.errors);
+}
 
 for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
   const definition = rows[rowIndex];
@@ -137,6 +289,19 @@ for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
   frameRows.push(frames);
   frames.forEach((frame, column) => {
     if (frame.area === 0) errors.push(`${definition.name}: frame ${column} is empty`);
+    for (const component of frame.componentAnalysis.detached) {
+      const finding = {
+        row: rowIndex,
+        column,
+        state: definition.name,
+        ...component,
+      };
+      const directionSinglePixel = rowIndex >= 9 && component.area <= 4;
+      const remoteOrVisible = component.area >= 8 || component.distanceFromMain > 2;
+      finding.rejected = !component.plausibleFoot && (directionSinglePixel || remoteOrVisible);
+      finding.reason = directionSinglePixel ? "isolated-direction-pixel" : remoteOrVisible ? "detached-fragment" : "near-edge-antialias";
+      componentFindings.push(finding);
+    }
   });
   for (let column = definition.frames; column < 8; column += 1) {
     const unusedFrame = readFrame(rowIndex, column);
@@ -178,6 +343,24 @@ for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
   }
 }
 
+const rejectedComponents = componentFindings.filter((component) => component.rejected);
+const rejectedComponentsByFrame = new Map();
+for (const component of rejectedComponents) {
+  const key = `${component.row}:${component.column}:${component.state}`;
+  const values = rejectedComponentsByFrame.get(key) ?? [];
+  values.push(component);
+  rejectedComponentsByFrame.set(key, values);
+}
+for (const [key, components] of rejectedComponentsByFrame) {
+  const [, column, state] = key.split(":");
+  const largest = components.reduce((first, second) => (second.area > first.area ? second : first));
+  errors.push(
+    `${state}: frame ${column} has ${components.length} rejected detached component(s); largest area=${largest.area}, bbox=[${largest.bbox.join(
+      ",",
+    )}], alpha=${largest.maxAlpha}, distance=${largest.distanceFromMain}px, reason=${largest.reason}`,
+  );
+}
+
 for (const [label, first, second] of [
   ["look 157.5 -> 180", frameRows[9][7], frameRows[10][0]],
   ["look 337.5 -> 000", frameRows[10][7], frameRows[9][0]],
@@ -187,6 +370,155 @@ for (const [label, first, second] of [
     errors.push(
       `${label}: center ${transition.center.toFixed(1)}px, IoU ${(transition.iou * 100).toFixed(1)}%, baseline ${transition.baseline}px, area ratio ${transition.areaRatio.toFixed(3)}`,
     );
+  }
+}
+
+function ratio(first, second) {
+  return Math.max(first, second) / Math.max(1, Math.min(first, second));
+}
+
+const idleReference = frameRows[0][0];
+const crossStateDefinitions = [
+  ["waving", 3, 0],
+  ["failed", 5, 0],
+  ["waiting", 6, 0],
+  ["active-work", 7, 0],
+  ["review", 8, 0],
+  ["look-up", 9, 0],
+  ["look-down", 10, 0],
+];
+const crossStateSummaries = crossStateDefinitions.map(([state, row, column]) => {
+  const frame = frameRows[row][column];
+  const summary = {
+    state,
+    row,
+    column,
+    centerXDelta: Math.abs(frame.centerX - idleReference.centerX),
+    massCenterYDelta: Math.abs(frame.centerY - idleReference.centerY),
+    topDelta: Math.abs(frame.top - idleReference.top),
+    baselineDelta: Math.abs(frame.baseline - idleReference.baseline),
+    widthRatio: ratio(frame.width, idleReference.width),
+    heightRatio: ratio(frame.height, idleReference.height),
+    areaRatio: ratio(frame.area, idleReference.area),
+  };
+  const failedChecks = [];
+  if (summary.centerXDelta > 8) failedChecks.push(`center-x ${summary.centerXDelta.toFixed(1)}px > 8px`);
+  if (summary.massCenterYDelta > 8) failedChecks.push(`mass-center-y ${summary.massCenterYDelta.toFixed(1)}px > 8px`);
+  if (summary.topDelta > 8) failedChecks.push(`top ${summary.topDelta}px > 8px`);
+  if (summary.baselineDelta > 8) failedChecks.push(`baseline ${summary.baselineDelta}px > 8px`);
+  if (summary.widthRatio > 1.1) failedChecks.push(`width ratio ${summary.widthRatio.toFixed(3)} > 1.100`);
+  if (summary.heightRatio > 1.07) failedChecks.push(`height ratio ${summary.heightRatio.toFixed(3)} > 1.070`);
+  if (summary.areaRatio > 1.08) failedChecks.push(`area ratio ${summary.areaRatio.toFixed(3)} > 1.080`);
+  summary.failedChecks = failedChecks;
+  if (failedChecks.length > 0) {
+    errors.push(`${state}: entry frame does not share idle silhouette landmarks (${failedChecks.join("; ")})`);
+  }
+  return summary;
+});
+
+const directionFrames = [...frameRows[9], ...frameRows[10]];
+const directionLabels = Array.from({ length: 16 }, (_, index) => {
+  const value = index * 22.5;
+  return Number.isInteger(value) ? String(value).padStart(3, "0") : String(value).padStart(5, "0");
+});
+const directionPairs = directionFrames.map((frame, index) => {
+  const nextIndex = (index + 1) % directionFrames.length;
+  return {
+    from: directionLabels[index],
+    to: directionLabels[nextIndex],
+    ...compare(frame, directionFrames[nextIndex]),
+  };
+});
+const sortedDirectionChanges = directionPairs.map((pair) => pair.changedPixels).sort((first, second) => first - second);
+const directionMedianChange =
+  (sortedDirectionChanges[7] + sortedDirectionChanges[8]) / 2;
+for (let index = 0; index < directionPairs.length; index += 1) {
+  const pair = directionPairs[index];
+  const previous = directionPairs[(index + directionPairs.length - 1) % directionPairs.length].changedPixels;
+  const next = directionPairs[(index + 1) % directionPairs.length].changedPixels;
+  const neighbourAverage = (previous + next) / 2;
+  pair.localOutlierRatio = pair.changedPixels / Math.max(1, neighbourAverage);
+  if (pair.localOutlierRatio > 2 && pair.changedPixels > directionMedianChange * 1.5) {
+    errors.push(
+      `look ${pair.from} -> ${pair.to}: local visual-change outlier ${pair.changedPixels}px is ${pair.localOutlierRatio.toFixed(
+        2,
+      )}x its neighbours`,
+    );
+  } else if (pair.localOutlierRatio > 1.6) {
+    warnings.push(
+      `look ${pair.from} -> ${pair.to}: local visual-change outlier ${pair.changedPixels}px is ${pair.localOutlierRatio.toFixed(
+        2,
+      )}x its neighbours`,
+    );
+  }
+}
+
+function placeholderGazeCentroid(frame) {
+  const boxes = [
+    [70, 92, 58, 88],
+    [102, 124, 58, 88],
+  ];
+  let count = 0;
+  let sumX = 0;
+  let sumY = 0;
+  for (const [left, right, top, bottom] of boxes) {
+    for (let y = top; y <= bottom; y += 1) {
+      for (let x = left; x <= right; x += 1) {
+        const index = y * CELL_WIDTH + x;
+        if (frame.alpha[index] < 192) continue;
+        const offset = index * 3;
+        const red = frame.premultipliedRgb[offset];
+        const green = frame.premultipliedRgb[offset + 1];
+        const blue = frame.premultipliedRgb[offset + 2];
+        if (red > 90 || green > 90 || blue > 100) continue;
+        count += 1;
+        sumX += x;
+        sumY += y;
+      }
+    }
+  }
+  return count === 0 ? null : { x: sumX / count, y: sumY / count, pixels: count };
+}
+
+let placeholderDirectionSemantics = null;
+if (placeholderProfile) {
+  const gazes = directionFrames.map(placeholderGazeCentroid);
+  if (gazes.some((gaze) => !gaze)) {
+    errors.push("placeholder directions: could not locate the high-contrast pupil feature in every direction frame");
+  } else {
+    const rightLeftDelta = gazes[4].x - gazes[12].x;
+    const downUpDelta = gazes[8].y - gazes[0].y;
+    const center = {
+      x: (gazes[4].x + gazes[12].x) / 2,
+      y: (gazes[0].y + gazes[8].y) / 2,
+    };
+    const angularErrors = gazes.map((gaze, index) => {
+      const observed = (Math.atan2(gaze.x - center.x, -(gaze.y - center.y)) * 180) / Math.PI;
+      const normalizedObserved = (observed + 360) % 360;
+      const expected = index * 22.5;
+      return Math.abs(((normalizedObserved - expected + 540) % 360) - 180);
+    });
+    placeholderDirectionSemantics = {
+      method: "pupil-feature-centroid",
+      gazes,
+      rightLeftDelta,
+      downUpDelta,
+      angularErrors,
+      maxAngularError: Math.max(...angularErrors),
+    };
+    if (rightLeftDelta < 4) {
+      errors.push(`placeholder directions: right/left pupil landmark separation ${rightLeftDelta.toFixed(1)}px is below 4px`);
+    }
+    if (downUpDelta < 3) {
+      errors.push(`placeholder directions: down/up pupil landmark separation ${downUpDelta.toFixed(1)}px is below 3px`);
+    }
+    if (placeholderDirectionSemantics.maxAngularError > 35) {
+      errors.push(
+        `placeholder directions: pupil landmark order deviates by up to ${placeholderDirectionSemantics.maxAngularError.toFixed(
+          1,
+        )} degrees`,
+      );
+    }
   }
 }
 
@@ -216,39 +548,43 @@ if (jumpLanding.center > 3 || jumpLanding.iou < 0.85 || jumpLanding.baseline > 3
 }
 
 const idleBoundaryFrame = frameRows[0][0];
-const desktopActionPaths = [
-  { name: "waving", frames: frameRows[3] },
-  { name: "jumping", frames: frameRows[4] },
-  { name: "failed", frames: frameRows[5] },
-  { name: "looking", frames: [...frameRows[9], ...frameRows[10]] },
-  { name: "rolling", frames: frameRows[5] },
-  { name: "lying", frames: [0, 1, 2, 3, 4, 4, 4, 3, 2, 1, 0].map((column) => frameRows[5][column]) },
-  { name: "mischief", frames: [0, 1, 2, 3, 2, 1, 0].map((column) => frameRows[5][column]) },
+const withIdleBoundary = (name, frames) => ({
+  name,
+  playback: [idleBoundaryFrame, ...frames, idleBoundaryFrame],
+});
+const desktopActionPlaybacks = [
+  withIdleBoundary("waving", frameRows[3]),
+  withIdleBoundary("jumping", frameRows[4]),
+  withIdleBoundary("failed", frameRows[5]),
+  withIdleBoundary("looking", [...frameRows[9], ...frameRows[10]]),
 ];
-const desktopActionSummaries = [];
-for (const action of desktopActionPaths) {
-  const playback = [idleBoundaryFrame, ...action.frames, idleBoundaryFrame];
-  const transitions = playback.slice(0, -1).map((frame, index) => compare(frame, playback[index + 1]));
-  const summary = {
-    action: action.name,
-    maxCenter: Math.max(...transitions.map((transition) => transition.center)),
-    minIou: Math.min(...transitions.map((transition) => transition.iou)),
-    maxBaseline: Math.max(...transitions.map((transition) => transition.baseline)),
-    maxAreaRatio: Math.max(...transitions.map((transition) => transition.areaRatio)),
-  };
-  desktopActionSummaries.push(summary);
-  const maxDesktopBaseline = placeholderProfile ? 16 : 12;
-  if (
-    summary.maxCenter > 23 ||
-    summary.minIou < 0.45 ||
-    summary.maxBaseline > maxDesktopBaseline ||
-    summary.maxAreaRatio > 1.3
-  ) {
-    errors.push(
-      `desktop ${action.name}: transition center ${summary.maxCenter.toFixed(1)}px, IoU ${(summary.minIou * 100).toFixed(1)}%, baseline ${summary.maxBaseline}px, area ratio ${summary.maxAreaRatio.toFixed(3)}`,
-    );
-  }
+const validPoseFrames =
+  desktopPoseInspection?.errors.length === 0 && desktopPoseInspection.frames.length === 16;
+if (validPoseFrames) {
+  desktopActionPlaybacks.push(
+    ...desktopPoseActionPlaybacks(idleBoundaryFrame, desktopPoseInspection.frames),
+  );
+} else {
+  desktopActionPlaybacks.push(
+    withIdleBoundary("rolling", frameRows[5]),
+    withIdleBoundary(
+      "lying",
+      [0, 1, 2, 3, 4, 4, 4, 3, 2, 1, 0].map((column) => frameRows[5][column]),
+    ),
+    withIdleBoundary(
+      "mischief",
+      [0, 1, 2, 3, 2, 1, 0].map((column) => frameRows[5][column]),
+    ),
+  );
 }
+const desktopActionAudit = auditDesktopActionPlaybacks(desktopActionPlaybacks, {
+  maxCenter: 23,
+  minIou: 0.45,
+  maxBaseline: placeholderProfile ? 16 : 12,
+  maxAreaRatio: 1.3,
+});
+const desktopActionSummaries = desktopActionAudit.summaries;
+errors.push(...desktopActionAudit.errors);
 
 console.table(
   summaries.map((row) => ({
@@ -262,6 +598,17 @@ console.table(
 );
 console.log(`Continuity profile: ${placeholderProfile ? "public placeholder (structure + loop safety)" : "coherent pet (strict)"}`);
 console.table(
+  crossStateSummaries.map((state) => ({
+    state: state.state,
+    "center x": `${state.centerXDelta.toFixed(1)}px`,
+    top: `${state.topDelta}px`,
+    baseline: `${state.baselineDelta}px`,
+    width: state.widthRatio.toFixed(3),
+    height: state.heightRatio.toFixed(3),
+    area: state.areaRatio.toFixed(3),
+  })),
+);
+console.table(
   desktopActionSummaries.map((action) => ({
     action: action.action,
     "max transition": `${action.maxCenter.toFixed(1)}px`,
@@ -270,6 +617,62 @@ console.table(
     "max area ratio": action.maxAreaRatio.toFixed(3),
   })),
 );
+
+const inputBytes = await fs.readFile(inputPath);
+const auditReport = {
+  schema: "codex-pet-continuity-audit/v2",
+  generatedAt: new Date().toISOString(),
+  ok: errors.length === 0,
+  profile: placeholderProfile ? "public-placeholder" : "coherent-pet-strict",
+  atlas: {
+    file: inputPath,
+    width: info.width,
+    height: info.height,
+    sha256: createHash("sha256").update(inputBytes).digest("hex").toUpperCase(),
+  },
+  errors,
+  warnings,
+  rows: summaries,
+  components: {
+    thresholdAlpha: COMPONENT_ALPHA_THRESHOLD,
+    detached: componentFindings,
+    rejected: rejectedComponents,
+  },
+  sharedLandmarks: {
+    reference: { state: "idle", row: 0, column: 0 },
+    description: "Silhouette top, mass centre, ground baseline, width, height and occupied area are geometric proxies for shared character landmarks.",
+    states: crossStateSummaries,
+  },
+  directions: {
+    labels: directionLabels,
+    medianChangedPixels: directionMedianChange,
+    pairs: directionPairs,
+    placeholderSemantics: placeholderDirectionSemantics,
+  },
+  desktopPoseAtlas: desktopPoseInspection
+    ? {
+        used: true,
+        valid: validPoseFrames,
+        file: desktopPoseInspection.file,
+        sha256: desktopPoseInspection.sha256,
+        width: desktopPoseInspection.width,
+        height: desktopPoseInspection.height,
+        columns: desktopPoseInspection.columns,
+        rows: desktopPoseInspection.rows,
+        frameCount: desktopPoseInspection.frameCount,
+        nonEmptyFrames: desktopPoseInspection.frames.filter((frame) => frame.area > 0).length,
+      }
+    : { used: false },
+  desktopActions: desktopActionSummaries,
+};
+
+if (reportPath) {
+  await fs.mkdir(path.dirname(reportPath), { recursive: true });
+  await fs.writeFile(reportPath, `${JSON.stringify(auditReport, null, 2)}\n`, "utf8");
+  console.log(`Wrote continuity audit: ${reportPath}`);
+}
+
+warnings.forEach((warning) => console.warn(`Animation continuity warning: ${warning}`));
 
 if (errors.length > 0) {
   console.error("Animation continuity check failed:");

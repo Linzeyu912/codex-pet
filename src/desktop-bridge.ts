@@ -8,9 +8,20 @@ export interface PetStatePayload {
     | "failed"
     | "waiting"
     | "running"
-    | "review";
-  updatedAt: number;
+    | "review"
+    | "looking"
+    | "rolling"
+    | "lying"
+    | "mischief";
+  updatedAt: unknown;
   source: string;
+  expiresAt?: unknown;
+  sessionId?: unknown;
+}
+
+export interface WindowPosition {
+  x: number;
+  y: number;
 }
 
 export async function readPetState(): Promise<PetStatePayload> {
@@ -18,13 +29,18 @@ export async function readPetState(): Promise<PetStatePayload> {
   return invoke<PetStatePayload>("read_pet_state");
 }
 
-export async function beginWindowDrag(): Promise<void> {
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  await getCurrentWindow().startDragging();
+export async function beginWindowDrag(): Promise<WindowPosition> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<WindowPosition>("get_pet_window_position");
+}
+
+export async function movePetWindow(x: number, y: number): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("move_pet_window", { x, y });
 }
 
 export async function endWindowDrag(): Promise<void> {
-  // Tauri's native drag operation ends automatically on pointer release.
+  // Manual pointer capture ends in the webview; no native drag session remains.
 }
 
 export async function hidePet(): Promise<void> {

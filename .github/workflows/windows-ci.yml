@@ -1,0 +1,56 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CODEX_PET_FORCE_PLACEHOLDER: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Ensure stable Rust
+        run: rustup default stable
+
+      - name: Verify source and public release gate
+        run: pnpm verify:ci
+
+      - name: Build the full Tauri NSIS bundle (best effort)
+        continue-on-error: true
+        run: pnpm build:tauri
+
+      - name: Upload public-safe portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-pet-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            release/Codex-Pet-*-portable.zip
+            release/Codex-Pet-*-portable.zip.sha256
+            release/Codex-Pet-*-portable.build-manifest.json

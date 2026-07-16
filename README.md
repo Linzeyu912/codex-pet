@@ -1,138 +1,123 @@
 # Codex Pet
 
-一只住在 Windows 桌面和 Codex 里的像素企鹅。
+一只同时住在 Codex 和 Windows 桌面的企鹅宠物。Codex Pet 把工作、等待、完成、检查和失败等状态变成连续动画；桌面版还能左右散步、拖动、回头、背身调皮、侧躺和翻滚。
 
-Codex Pet 把 Codex 的工作、等待、完成和失败状态变成桌面宠物动作。当前原型包含两种形态：
+当前版本：`0.2.0`。
 
-- **Codex 内置宠物**：使用 Codex Pets V2 图集，可在 Codex 设置中选择。
-- **Windows 桌面宠物**：透明、置顶、可拖动，带右键菜单、托盘、位置记忆和开机启动。
+> 这是独立的非官方兼容项目，不隶属于、未获腾讯或 OpenAI 赞助、认可或审核。代码采用 MIT 许可证；经典 QQ 企鹅及其像素重绘只用于个人本地实验，不提交 Git、不包含在 MIT 许可中，也不进入公共发布包。
 
-> 当前版本：`0.1.0`。代码仓库不分发 QQ、腾讯或其他第三方拥有权利的角色素材；经典企鹅像素重绘只用于本地原型，并被 Git 忽略。
+## 两套运行形态
 
-## 当前进度
+- **Codex 自定义宠物**：遵循 Codex Pets V2 的 `8 × 11` 图集契约，安装后可在 `Settings → Pets` 中选择。
+- **Windows 桌面宠物**：透明置顶、可拖动，支持托盘、位置记忆、开机启动、自动巡游、状态桥接和动作菜单。当前可直接运行的外壳为 PowerShell/WPF；仓库也包含 Tauri 2 前端与原生壳。
 
-- [x] D 盘本地仓库与 GitHub 远程仓库连接
-- [x] 经典红围巾企鹅的本地像素基准图
-- [x] Codex Pets V2 `8 × 11` 动作图集
-- [x] 通过当前 Codex 官方图集校验器（零错误、零警告）
-- [x] 安装到本机 Codex Pets 目录
-- [x] Windows 透明置顶桌面宠物
-- [x] 自动左右巡游、碰边转向、随机闲逛动作
-- [x] 正面、侧面、背面、躺下与摔倒恢复像素关键帧
-- [x] 拖动、位置记忆、动作菜单、托盘与开机启动
-- [x] Codex 状态文件桥接与动作演示
-- [x] 可直接运行的 Windows 便携包
-- [ ] 自动观察现有 Codex 桌面任务的全部实时阶段
-- [ ] 经过代码签名的 `.exe` / NSIS 安装包
+Codex 官方说明：[Pets](https://learn.chatgpt.com/docs/pets)。仓库中的详细兼容契约见 [docs/codex-pet-contract.md](docs/codex-pet-contract.md)。
 
-## 立即运行
+## 在 D 盘运行
 
-环境要求：Windows 10/11、Node.js 20.19+ 或 22.12+、pnpm 11+；推荐 Node.js 24。本仓库已在 Node.js 24 与 pnpm 11 上验证。
+以下只是路径示例，程序不会硬编码某台电脑的绝对路径：
 
 ```powershell
-pnpm install
+Set-Location D:\
+git clone https://github.com/Linzeyu912/codex-pet.git
+Set-Location D:\codex-pet
+pnpm install --frozen-lockfile
 pnpm assets:prepare
 pnpm dev
 ```
 
-干净克隆没有本地角色素材时，会自动生成并使用公开的几何占位企鹅，因此以上命令仍可直接运行。放入本地经典企鹅基准图后，再次执行 `pnpm assets:prepare` 即会切换为本地经典形象。
+环境要求：Windows 10/11、Node.js 20.19+ 或 22.12+、pnpm 11+；推荐 Node.js 24。也可双击 `windows\Start-CodexPet.cmd` 启动。启动诊断日志保存在 `%LOCALAPPDATA%\Codex Pet\logs`。
 
-也可以直接双击：
+干净克隆没有本地角色素材时，会自动生成并使用可公开发布的几何占位企鹅，项目仍可完整运行。
 
-```text
-windows\Start-CodexPet.cmd
-```
+## 桌面操作
 
-操作方式：
+- 按住左键拖动；向右移动时播放右侧步态，向左移动时播放左侧步态。
+- 松开拖拽、自动巡游碰边转向或定时结束左右跑动时，会等当前步态循环到边界再切换，避免半途闪回正面。
+- 双击企鹅挥手；右键菜单可指定散步、张望、装摔、侧躺、翻滚，也可暂停动画、切换自动闲逛、设置开机启动、隐藏或退出。
+- 自动闲逛会混合左右巡游、跳跃、张望、背身调皮、侧躺和翻滚；屏幕启用“减少动态效果”时会降低刷新和动作强度。
+- `failed` 先完整播放一次失败动作，再停留在躺倒帧，直到远端状态改变或过期。
 
-- 按住企鹅左键拖动。
-- 双击企鹅触发挥手。
-- 放着不管时会自动左右散步、四处看看、跳跃、躺下、装摔或摔倒后爬起，碰到屏幕边缘会转向。
-- 右键打开菜单，可开关自动闲逛，并立即指定向左/右散步、四处张望、装摔一下、躺一下或摔倒又爬起。
-- 右键菜单也可暂停动画、设置开机启动、隐藏或退出。
-- 隐藏后可从系统托盘重新显示。
+## 本地经典企鹅素材
 
-## 本地角色素材
+公开仓库只包含程序、生成与校验工具、应用图标和无权利负担的占位图，不分发经典 QQ 企鹅素材。
 
-公开仓库只包含程序、图集生成器和无权利负担的占位图，不包含经典 QQ 企鹅素材。
-
-开发者需自行准备有权使用的透明 PNG，并放到：
+有权进行个人本地实验的开发者，可自行准备透明 PNG：
 
 ```text
 .local-assets\qq-penguin\pixel-base.png
 ```
 
-可选的 `4 × 4` 多姿态像素表可放到：
+可选的 `4 × 4` 多角度姿态表放在：
 
 ```text
 .local-assets\qq-penguin\poses\pose-sheet-v1.png
 ```
 
-四行依次用于左侧散步、右侧散步、背面/回头姿态和躺下/摔倒恢复姿态。缺少该文件时仍会从正面基准图生成兼容动作。
-
-随后运行：
+四行依次表达左侧步态、右侧步态、背面/回头姿态，以及侧躺/翻滚/恢复姿态。生成器会把 16 个姿态统一为 `192 × 208` 单元，并在本地生成 `desktop-poses.png`。它只扩展 WPF/Tauri 桌面动作，不改变 Codex Pets V2 的 11 行契约；缺少姿态表时，桌面端会退回 V2 图集内的兼容动作。
 
 ```powershell
 pnpm assets:build
 ```
 
-生成器会自动完成绿幕残留清理、主体裁剪、限色像素化、动作帧生成和 V2 图集组装。所有衍生素材继续留在 `.local-assets/`，不会被 Git 提交。
+本地经典形象及其全部衍生文件留在被 Git 忽略的 `.local-assets/`、`public/local/` 或本地发布目录中。像素重绘不改变原角色的权利归属，详情见 [ASSET-LICENSES.md](ASSET-LICENSES.md)。
 
 ## 安装到 Codex
+
+先只检查来源、目标与冲突，不写入文件：
+
+```powershell
+pnpm assets:install -- --dry-run
+```
+
+确认后进行原子安装：
 
 ```powershell
 pnpm assets:install
 ```
 
-存在本地经典企鹅素材时安装到：
+安装器只写入 `%CODEX_HOME%\pets\<pet-id>`；未设置 `CODEX_HOME` 时使用当前用户的 `.codex\pets`。它先在同级临时目录准备完整文件，再一次性替换目标，并写入 `.codex-pet-install-receipt.json`，记录版本、文件 SHA-256、目标和备份位置。升级与卸载还会核对 receipt 的宠物 ID、实际目标，并拒绝经过链接或 junction 的备份恢复路径。
 
-```text
-%CODEX_HOME%\pets\qq-penguin\
+若目标已有文件，完整的本项目安装也会先备份；未被本项目拥有或安装后被修改的目录默认拒绝覆盖。只有检查无误后才应使用：
+
+```powershell
+pnpm assets:install -- --force
 ```
 
-未设置 `CODEX_HOME` 时使用：
+备份位于 `%CODEX_HOME%\pets\.codex-pet-backups\<pet-id>\<timestamp>`。卸载默认验证 receipt 和文件哈希，并恢复上次安装留下的备份：
 
-```text
-%USERPROFILE%\.codex\pets\qq-penguin\
+```powershell
+pnpm assets:uninstall -- --dry-run
+pnpm assets:uninstall
 ```
 
-安装后进入 Codex 的 `Settings → Pets`，点击刷新并选择 `QQ Penguin`。运行时 ID 为 `custom:qq-penguin`。
+可用 `--no-restore-backup` 只移除当前安装，或用 `--pet-id <id>` 明确目标；检测到未知或已修改文件时仍需显式 `--force`。测试其他 Codex 配置可向安装和卸载命令传入 `--codex-home <path>`。
 
-没有本地经典素材时会安装公开占位宠物到 `pets\codex-penguin-placeholder`，运行时 ID 为 `custom:codex-penguin-placeholder`。
+有本地经典素材时，默认宠物 ID 为 `custom:qq-penguin`；没有时安装公开占位宠物 `custom:codex-penguin-placeholder`。安装后进入 Codex 的 `Settings → Pets`，刷新并选择对应宠物。
 
-## Codex Pets V2 接口
-
-当前图集规格：
+## Codex Pets V2 图集
 
 - 图集：透明 PNG 或 WebP，`1536 × 2288`
 - 网格：8 列 × 11 行
 - 单帧：`192 × 208`
-- `pet.json` 必须显式设置 `"spriteVersionNumber": 2`
+- `pet.json`：必须显式设置 `"spriteVersionNumber": 2`
 
 | 行 | 动作 | 有效帧 |
-| --- | --- | ---: |
-| 0 | idle | 6 帧，另在第 7 格保留校验用中性帧 |
+| ---: | --- | ---: |
+| 0 | idle | 6，另在第 7 格放中性 QA 帧 |
 | 1 | running-right | 8 |
 | 2 | running-left | 8 |
 | 3 | waving | 4 |
 | 4 | jumping | 5 |
 | 5 | failed | 8 |
-| 6 | waiting | 6 |
+| 6 | waiting / needs input | 6 |
 | 7 | running / working | 6 |
-| 8 | review | 6 |
+| 8 | review / ready | 6 |
 | 9–10 | 16 个顺时针视线方向 | 每行 8 |
-
-完整契约见 [docs/codex-pet-contract.md](docs/codex-pet-contract.md)。
 
 ## 状态桥接
 
-Windows 宠物读取：
-
-```text
-%USERPROFILE%\.codex-pet\state.json
-```
-
-可以用命令模拟状态：
+Windows 宠物读取当前用户目录下的 `.codex-pet\state.json`。可用命令模拟状态：
 
 ```powershell
 pnpm state running
@@ -140,83 +125,72 @@ pnpm state waiting
 pnpm state jumping
 pnpm state failed
 pnpm state idle
+pnpm state running -- --ttl-ms 90000 --session demo-1
 ```
 
-状态文件格式：
+当前格式：
 
 ```json
 {
   "state": "running",
   "updatedAt": 1783950000000,
-  "source": "codex-notify"
+  "source": "codex-notify",
+  "sessionId": "thread-123",
+  "expiresAt": 1783950090000
 }
 ```
 
-标准 Codex 状态为：`idle`、`running-right`、`running-left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`。独立桌面版另外支持：`looking`、`mischief`、`lying`、`rolling`。
+- `updatedAt` 必须是 JSON 数值类型的正安全整数 Unix 毫秒（不大于 `Number.MAX_SAFE_INTEGER`）；字符串、布尔值、非整数数值、非有限值、非正数或超界值都不会接管当前状态。
+- `sessionId` 区分不同任务或桥接器，读入时会去除首尾空白；缺少、空白或非字符串值归入 `legacy`，写入器则生成安全默认 ID。有效的新会话即使时间戳较旧也可接管状态。
+- `expiresAt` 可为 Unix 毫秒或可解析的日期时间字符串；到期自动回到 `idle`。
+- 旧格式仍兼容：非 `idle` 且缺少、无效或非正数的 `expiresAt` 时，以 `updatedAt + 15 分钟` 作为安全过期时间；缺少、空白或非字符串的 `sessionId` 归入 `legacy` 会话。
+- 标准 V2 状态为 `idle`、`running-right`、`running-left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`；桌面版另支持 `looking`、`mischief`、`lying`、`rolling`。
 
-Codex 的 `notify` 可在每轮完成时调用 `scripts/codex-notify.mjs`，把结果映射为庆祝或失败动作。它不是完整的实时会话监听器；正在工作、等待输入等阶段仍通过状态桥接器或未来的 App Server 适配器提供。
+Codex 的外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications) 当前只发送 `agent-turn-complete`，`scripts/codex-notify.mjs` 会把它映射为 `jumping`，并用官方的 `thread-id` 隔离任务会话。脚本仍兼容第三方或自定义载荷中的 `fail` / `error` 事件并映射为 `failed`，但这不是 Codex 官方 `notify` 当前提供的失败事件。它也不是完整的实时任务监听器；工作中和等待输入等阶段仍由状态文件桥接。
 
-## 构建便携版
+## 验证与发布
+
+日常改动运行统一验证：
 
 ```powershell
-pnpm build
+pnpm verify
 ```
 
-输出：
+它检查版本一致性、脚本语法、TypeScript、Web 构建、公开占位图集、连续性、PowerShell，并在本机可用时调用 Codex 官方图集校验器。发布前运行：
+
+```powershell
+pnpm release:gate
+```
+
+`pnpm build` 是同一发布门禁的别名。发布门禁还会逐动作执行 WPF smoke、清理旧版或未验证的生成物、创建便携包、验证清单与 SHA-256，并检查 Git 中没有本地经典素材。CI 使用 `pnpm verify:ci`，还要求 Rust/Tauri 编译检查与单元测试通过。本地经典图集另须通过零警告的 V2 权威 QA 汇总、低透明度青色色边清零和完整 14 对方向盲测；盲测图由待测图集确定性生成，三位隔离评审必须逐项一致且置信度不低于 `medium`，图集、盲测图和原始 verdict 均以 SHA-256 绑定，旧汇总不能复用。生成目录和固定输出还会拒绝符号链接与 Windows junction，避免构建写出项目边界。
+
+公共构建始终强制使用占位企鹅，即使本机存在经典素材：
 
 ```text
-release\CodexPet-portable\
-release\Codex-Pet-0.1.0-portable.zip
+release\CodexPet-0.2.0-public-placeholder\
+release\Codex-Pet-0.2.0-portable.zip
+release\Codex-Pet-0.2.0-portable.zip.sha256
+release\Codex-Pet-0.2.0-portable.build-manifest.json
 ```
 
-便携版不编译或安装未签名程序，适合启用了严格 Windows 应用控制策略的电脑。
+只有明确执行下列命令，才会生成带本地经典素材、不可分发的便携包；该模式在 CI 和公共发布流程中会被拒绝：
+
+```powershell
+pnpm build:portable:local-classic
+```
 
 ## 项目结构
 
 ```text
-src/                 Tauri/Web 前端状态机
-src-tauri/           Tauri 2 原生桌面壳（后续签名安装包）
-windows/             当前可运行的 PowerShell/WPF 桌面壳
-scripts/             图集生成、安装和状态桥接
-docs/                角色、接口与架构说明
-public/placeholder.svg 公开占位角色
-.local-assets/       本地第三方素材与衍生文件（Git 忽略）
+src/                    Tauri/Web 前端状态机
+src-tauri/              Tauri 2 原生桌面壳
+windows/                PowerShell/WPF 桌面壳与便携构建
+scripts/                图集、QA、安装、发布和状态桥接
+docs/                   角色与接口说明
+public/placeholder.svg  MIT 许可的公开占位角色
+.local-assets/          本地第三方素材与衍生文件（Git 忽略）
 ```
 
-```mermaid
-flowchart LR
-    C["Codex 状态 / notify"] --> B["状态桥接"]
-    M["手动演示命令"] --> B
-    B --> S["~/.codex-pet/state.json"]
-    S --> W["Windows 桌面宠物"]
-    A["统一角色基准"] --> G["逐动作整行生成 + 稳定锚点装配"]
-    G --> W
-    G --> P["Codex Settings → Pets"]
-```
+## 许可证与责任边界
 
-## 验证
-
-```powershell
-pnpm check
-pnpm smoke
-pnpm assets:validate
-pnpm assets:continuity
-pnpm build
-```
-
-`pnpm smoke` 会启动真实 WPF 窗口、渲染图集并保存本地截图后自动退出；`pnpm assets:validate` 会先重建，再使用当前 Codex 安装内置的官方校验器进行 V2 验证；`pnpm assets:continuity` 检查每行的空帧、脚底基线、相邻帧质心位移、轮廓重叠和循环接缝，防止动作再次出现明显闪切。公开几何占位宠物只执行结构与循环安全检查；本地经典角色图集使用更严格的体型、方向和桌面动作切换门槛。
-
-本地若存在通过官方 hatch-pet 校验的 `.local-assets/qq-penguin/coherent-v2-run/final/spritesheet-extended.webp`，构建器会优先使用这套整行动作图集。每个状态都由同一角色基准独立生成并以共享尺度、共享脚底锚点装配；不存在已验证图集时，仓库仍可退回公开占位图或旧的本地素材流程。
-
-官方校验命令额外要求已安装 Codex Windows App，以及可从命令行调用的 Python 3 和 Pillow；这些不是运行桌面宠物或构建便携版的必需项。
-
-## 素材与版权
-
-- 程序代码、接口文档与公开占位图不依赖 QQ 品牌素材。
-- 经典 QQ 企鹅参考图、像素重绘、动作图集和包含它们的本地便携包不会提交到公开仓库。
-- 对外发布含经典形象的截图、安装包或素材包前，应取得相关权利人的明确许可。
-- 贡献者不得提交未经授权的第三方角色素材。
-
-## License
-
-代码许可证将在首个公开发行版前确定。在许可证明确之前，请勿将仓库内容或本地角色素材用于商业发行。
+源代码、文档、公开占位角色和项目自制应用图标采用 [MIT License](LICENSE)。经典 QQ 企鹅参考、像素重绘、衍生图集，以及任何标记为 `local-classic` 的包均不在 MIT 授权范围内，也不应上传到 GitHub Releases、软件商店或其他公开渠道。贡献和安全说明分别见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)。

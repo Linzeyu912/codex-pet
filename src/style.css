@@ -32,9 +32,11 @@ button {
   display: grid;
   place-items: end center;
   padding-bottom: 12px;
+  touch-action: none;
 }
 
-.pet-shell:active {
+.pet-shell:active,
+.pet-shell[data-dragging="true"] {
   cursor: grabbing;
 }
 
@@ -159,4 +161,19 @@ button {
   height: 1px;
   margin: 5px 4px;
   background: rgb(255 255 255 / 14%);
+}
+
+.pet-shell[data-motion="reduced"] .speech-bubble {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sprite-stage {
+    filter: drop-shadow(0 5px 4px rgb(0 0 0 / 18%));
+  }
+
+  .speech-bubble,
+  .context-menu button {
+    transition: none;
+  }
 }

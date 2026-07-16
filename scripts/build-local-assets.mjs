@@ -1,7 +1,26 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import sharp from "sharp";
+import {
+  blindDirectionReportPasses,
+  blindVerdictsMatchReport,
+  directionContinuityReportPasses,
+  directionSemanticsReportPasses,
+} from "./lib/atlas-quality.mjs";
+import { renderBlindDirectionSheet } from "./lib/blind-sheet.mjs";
+import { readAtlasFrame } from "./lib/frame-analysis.mjs";
+import { POSE_ATLAS_CELL_MARGIN } from "./lib/pose-atlas-quality.mjs";
+import { auditChromaFringeFile } from "./remove-chroma-fringe.mjs";
+import {
+  atomicReplaceSafeOutputs,
+  materializeSafeOutputTree,
+  preflightSafeOutputTree,
+  realFileWithin,
+  removeSafeOutputs,
+  safeOutputFrom,
+} from "./lib/project-utils.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(scriptPath);
@@ -16,6 +35,16 @@ const ATLAS_HEIGHT = CELL_HEIGHT * ATLAS_ROWS;
 const BASE_WIDTH = 160;
 const BASE_HEIGHT = 154;
 const BASELINE_Y = 188;
+const POSE_TARGET_AREA_RATIOS = Object.freeze([
+  0.82, 0.82, 0.86, 0.84,
+  0.82, 0.82, 0.86, 0.84,
+  0.86, 0.86, 0.86, 0.82,
+  0.72, 0.78, 0.85, 0.86,
+]);
+const STRICT_CHROMA_FRINGE_OPTIONS = Object.freeze({
+  distanceThreshold: 160,
+  alphaMinimum: 1,
+});
 
 const classicRoot = path.join(projectRoot, ".local-assets", "qq-penguin");
 const classicSourcePath = path.join(classicRoot, "pixel-base.png");
@@ -23,6 +52,7 @@ const classicPoseSheetPath = path.join(classicRoot, "poses", "pose-sheet-v1.png"
 const coherentRunRoot = path.join(classicRoot, "coherent-v2-run");
 const coherentAtlasPath = path.join(coherentRunRoot, "final", "spritesheet-extended.webp");
 const coherentValidationPath = path.join(coherentRunRoot, "final", "validation-extended.json");
+const coherentRunSummaryPath = path.join(coherentRunRoot, "qa", "run-summary.json");
 const placeholderSourcePath = path.join(projectRoot, "public", "placeholder.svg");
 const publicRoot = path.join(projectRoot, "public", "local");
 
@@ -52,8 +82,9 @@ async function resolveSource() {
         manifest: classicManifest,
         usedPlaceholder: false,
       };
-    } catch {
-      // Fall through to the rights-safe placeholder.
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      // Fall through to the rights-safe placeholder only when the classic source is absent.
     }
   }
   await fs.access(placeholderSourcePath);
@@ -68,13 +99,36 @@ async function resolveSource() {
 async function resolveValidatedCoherentAtlas() {
   try {
     await fs.access(coherentAtlasPath);
-    await fs.access(coherentValidationPath);
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     throw error;
   }
+  for (const evidencePath of [coherentValidationPath, coherentRunSummaryPath]) {
+    try {
+      await fs.access(evidencePath);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        throw new Error(`The coherent atlas exists but required QA evidence is missing: ${evidencePath}`);
+      }
+      throw error;
+    }
+  }
+  await realFileWithin(coherentRunRoot, coherentAtlasPath, "Final atlas");
+  await realFileWithin(coherentRunRoot, coherentValidationPath, "Official validation");
+  await realFileWithin(coherentRunRoot, coherentRunSummaryPath, "Authoritative QA summary");
+
+  const chromaAudit = await auditChromaFringeFile(
+    coherentAtlasPath,
+    STRICT_CHROMA_FRINGE_OPTIONS,
+  );
+  if (chromaAudit.total !== 0) {
+    throw new Error(
+      `The coherent V2 atlas still has ${chromaAudit.total} visible cyan edge-fringe pixels.`,
+    );
+  }
 
   const validation = JSON.parse(await fs.readFile(coherentValidationPath, "utf8"));
+  const runSummary = JSON.parse(await fs.readFile(coherentRunSummaryPath, "utf8"));
   const atlasStats = await fs.stat(coherentAtlasPath);
   const validationStats = await fs.stat(coherentValidationPath);
   const validationFile = path.resolve(validation.file ?? "").toLocaleLowerCase();
@@ -92,6 +146,126 @@ async function resolveValidatedCoherentAtlas() {
     validationStats.mtimeMs < atlasStats.mtimeMs
   ) {
     throw new Error(`The coherent V2 atlas exists but its validation did not pass: ${coherentValidationPath}`);
+  }
+
+  const atlasSha256 = createHash("sha256")
+    .update(await fs.readFile(coherentAtlasPath))
+    .digest("hex")
+    .toUpperCase();
+  const requiredGates = [
+    "officialValidation",
+    "chromaClean",
+    "continuity",
+    "blindDirections",
+    "directionSemantics",
+    "directionContinuity",
+    "finalReview",
+  ];
+  if (
+    runSummary.schema !== "codex-pet-authoritative-run/v2" ||
+    runSummary.ok !== true ||
+    path.resolve(runSummary.atlas?.file ?? "").toLocaleLowerCase() !== expectedFile ||
+    runSummary.atlas?.sha256?.toUpperCase() !== atlasSha256 ||
+    requiredGates.some((gate) => runSummary.qualityGates?.[gate] !== true)
+  ) {
+    throw new Error(`The coherent atlas has no passing authoritative QA run: ${coherentRunSummaryPath}`);
+  }
+  const summaryStats = await fs.stat(coherentRunSummaryPath);
+  if (summaryStats.mtimeMs < atlasStats.mtimeMs) {
+    throw new Error(`The authoritative QA run is stale: ${coherentRunSummaryPath}`);
+  }
+  const requiredArtifacts = [
+    "officialValidation",
+    "continuity",
+    "blindDirections",
+    "directionSemantics",
+    "directionContinuity",
+    "finalReview",
+  ];
+  const expectedArtifactPaths = {
+    officialValidation: coherentValidationPath,
+    continuity: path.join(coherentRunRoot, "qa", "continuity-audit-v2.json"),
+    blindDirections: path.join(coherentRunRoot, "qa", "direction-blind-validation.json"),
+    directionSemantics: path.join(coherentRunRoot, "qa", "direction-semantics.json"),
+    directionContinuity: path.join(coherentRunRoot, "qa", "look-continuity.json"),
+    finalReview: path.join(coherentRunRoot, "qa", "final-frame-review.json"),
+  };
+  for (const name of requiredArtifacts) {
+    const artifact = runSummary.artifacts?.[name];
+    const artifactPath = path.resolve(artifact?.file ?? "");
+    const expectedArtifactPath = path.resolve(expectedArtifactPaths[name]);
+    if (artifactPath.toLocaleLowerCase() !== expectedArtifactPath.toLocaleLowerCase()) {
+      throw new Error(`The authoritative QA artifact path is not canonical (${name}): ${artifactPath}`);
+    }
+    let artifactStats;
+    try {
+      await realFileWithin(coherentRunRoot, artifactPath, `${name} QA artifact`);
+      artifactStats = await fs.stat(artifactPath);
+    } catch {
+      throw new Error(`The authoritative QA artifact is missing (${name}): ${artifactPath}`);
+    }
+    const artifactSha256 = createHash("sha256")
+      .update(await fs.readFile(artifactPath))
+      .digest("hex")
+      .toUpperCase();
+    if (
+      artifactSha256 !== artifact.sha256?.toUpperCase() ||
+      artifactStats.mtimeMs < atlasStats.mtimeMs ||
+      summaryStats.mtimeMs < artifactStats.mtimeMs
+    ) {
+      throw new Error(`The authoritative QA artifact is stale or was replaced (${name}): ${artifactPath}`);
+    }
+  }
+
+  const directionContinuityReport = JSON.parse(
+    await fs.readFile(expectedArtifactPaths.directionContinuity, "utf8"),
+  );
+  if (!directionContinuityReportPasses(directionContinuityReport, atlasSha256)) {
+    throw new Error("The direction-continuity report is incomplete or not bound to the final atlas.");
+  }
+  const directionSemanticsReport = JSON.parse(
+    await fs.readFile(expectedArtifactPaths.directionSemantics, "utf8"),
+  );
+  if (!directionSemanticsReportPasses(directionSemanticsReport, atlasSha256)) {
+    throw new Error("The direction-semantics report is incomplete or not bound to the final atlas.");
+  }
+
+  const blindReportPath = path.resolve(runSummary.artifacts.blindDirections.file);
+  const blindReport = JSON.parse(await fs.readFile(blindReportPath, "utf8"));
+  if (
+    !blindDirectionReportPasses(blindReport, { atlasSha256 }) ||
+    path.resolve(blindReport.atlas?.file ?? "").toLocaleLowerCase() !== expectedFile
+  ) {
+    throw new Error(`The direction blind-review report did not pass the strict gate: ${blindReportPath}`);
+  }
+  const deterministicBlindSheetSha256 = createHash("sha256")
+    .update(await renderBlindDirectionSheet(coherentAtlasPath))
+    .digest("hex")
+    .toUpperCase();
+  if (deterministicBlindSheetSha256 !== blindReport.blindSheet.sha256.toUpperCase()) {
+    throw new Error("The reviewed blind sheet was not deterministically generated from the final atlas.");
+  }
+  const realEvidencePaths = [];
+  const reviewerVerdicts = [];
+  for (const evidence of [blindReport.blindSheet, ...blindReport.reviewers]) {
+    const evidencePath = await realFileWithin(coherentRunRoot, evidence.file, "Blind-review evidence");
+    realEvidencePaths.push(evidencePath.toLocaleLowerCase());
+    const evidenceSha256 = createHash("sha256")
+      .update(await fs.readFile(evidencePath))
+      .digest("hex")
+      .toUpperCase();
+    if (evidenceSha256 !== evidence.sha256.toUpperCase()) {
+      throw new Error(`Blind-review evidence was replaced after review: ${evidencePath}`);
+    }
+    if (evidence !== blindReport.blindSheet) {
+      reviewerVerdicts.push(JSON.parse(await fs.readFile(evidencePath, "utf8")));
+    }
+  }
+  if (new Set(realEvidencePaths).size !== realEvidencePaths.length) {
+    throw new Error("Blind-review evidence paths are not unique after realpath resolution.");
+  }
+  if (!blindVerdictsMatchReport(blindReport, reviewerVerdicts)) {
+    throw new Error("The compiled blind report does not match the three raw reviewer verdicts.");
   }
 
   const metadata = await sharp(coherentAtlasPath).metadata();
@@ -289,8 +463,9 @@ async function normalizePoseCell(sheetData, sheetWidth, sheetHeight, cell) {
 async function loadPoseFrames(inputPath) {
   try {
     await fs.access(inputPath);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
   }
 
   const { data, info } = await sharp(inputPath)
@@ -315,6 +490,160 @@ async function loadPoseFrames(inputPath) {
     }
   }
   return poses;
+}
+
+function inspectRawPoseFrame(frame) {
+  let area = 0;
+  let sumX = 0;
+  let sumY = 0;
+  let minX = frame.width;
+  let minY = frame.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const offset = pixelOffset(x, y, frame.width);
+      if (frame.data[offset + 3] <= 8) continue;
+      area += 1;
+      sumX += x;
+      sumY += y;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (area === 0) throw new Error("A normalized pose frame is empty.");
+  return {
+    area,
+    centerX: sumX / area,
+    centerY: sumY / area,
+    left: minX,
+    top: minY,
+    right: maxX,
+    baseline: maxY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
+}
+
+async function loadPoseReferenceMetrics(inputPath) {
+  if (!inputPath) return null;
+  const { data, info } = await sharp(inputPath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  if (info.width !== ATLAS_WIDTH || info.height !== ATLAS_HEIGHT) {
+    throw new Error(`Pose reference atlas must be ${ATLAS_WIDTH}x${ATLAS_HEIGHT}, got ${info.width}x${info.height}.`);
+  }
+  const idle = readAtlasFrame(data, {
+    atlasWidth: ATLAS_WIDTH,
+    cellWidth: CELL_WIDTH,
+    cellHeight: CELL_HEIGHT,
+    row: 0,
+    column: 0,
+  });
+  if (idle.area === 0) throw new Error(`Pose reference atlas has an empty idle frame: ${inputPath}`);
+  return { file: inputPath, ...idle };
+}
+
+async function scalePoseFrameToReference(frame, index, reference) {
+  const source = inspectRawPoseFrame(frame);
+  const desiredArea = reference.area * POSE_TARGET_AREA_RATIOS[index];
+  const desiredAreaScale = desiredArea / source.area;
+  let scaleX = Math.sqrt(desiredAreaScale);
+  let scaleY = scaleX;
+  const maxWidth = Math.min(
+    CELL_WIDTH - POSE_ATLAS_CELL_MARGIN * 2,
+    Math.max(BASE_WIDTH, Math.round(reference.width * 1.03)),
+  );
+  const maxHeight = Math.min(CELL_HEIGHT - POSE_ATLAS_CELL_MARGIN * 2, reference.height);
+
+  if (source.width * scaleX > maxWidth) {
+    scaleX = maxWidth / source.width;
+    scaleY = desiredAreaScale / scaleX;
+  }
+  if (source.height * scaleY > maxHeight) {
+    scaleY = maxHeight / source.height;
+    scaleX = desiredAreaScale / scaleY;
+  }
+  scaleX = Math.min(scaleX, maxWidth / source.width);
+  scaleY = Math.min(scaleY, maxHeight / source.height);
+
+  const targetWidth = Math.max(2, Math.round(frame.width * scaleX));
+  const targetHeight = Math.max(2, Math.round(frame.height * scaleY));
+  const { data, info } = await sharp(frame.data, {
+    raw: { width: frame.width, height: frame.height, channels: 4 },
+  })
+    .resize(targetWidth, targetHeight, { fit: "fill", kernel: sharp.kernel.nearest })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const scaled = { data: Buffer.from(data), width: info.width, height: info.height };
+  for (let offset = 0; offset < scaled.data.length; offset += 4) {
+    if (scaled.data[offset + 3] === 0) clearPixel(scaled.data, offset);
+  }
+  return scaled;
+}
+
+async function buildDesktopPoseAtlas(poseFrames, referenceAtlasPath = null) {
+  if (!Array.isArray(poseFrames) || poseFrames.length !== 16) {
+    throw new Error(`desktop-poses.png requires exactly 16 normalized poses, got ${poseFrames?.length ?? 0}.`);
+  }
+  const reference = await loadPoseReferenceMetrics(referenceAtlasPath);
+  const normalizedPoseFrames = reference
+    ? await Promise.all(poseFrames.map((frame, index) => scalePoseFrameToReference(frame, index, reference)))
+    : poseFrames;
+  const width = CELL_WIDTH * 4;
+  const height = CELL_HEIGHT * 4;
+  const atlas = Buffer.alloc(width * height * 4);
+  const expectedBaseline = reference?.baseline ?? BASELINE_Y - 1;
+  for (let index = 0; index < normalizedPoseFrames.length; index += 1) {
+    const source = normalizedPoseFrames[index];
+    const sourceMetrics = inspectRawPoseFrame(source);
+    const defaultFrame = makeFrame(null, { source });
+    const minLeft = POSE_ATLAS_CELL_MARGIN - sourceMetrics.left;
+    const maxLeft = CELL_WIDTH - 1 - POSE_ATLAS_CELL_MARGIN - sourceMetrics.right;
+    const alignedLeft = reference
+      ? Math.max(minLeft, Math.min(maxLeft, Math.round(reference.centerX - sourceMetrics.centerX)))
+      : defaultFrame.left;
+    const alignedTop = reference ? expectedBaseline - sourceMetrics.baseline : defaultFrame.top;
+    const frame = { ...source, left: alignedLeft, top: alignedTop };
+    if (
+      frame.left + sourceMetrics.left < POSE_ATLAS_CELL_MARGIN ||
+      frame.top + sourceMetrics.top < POSE_ATLAS_CELL_MARGIN ||
+      frame.left + sourceMetrics.right > CELL_WIDTH - 1 - POSE_ATLAS_CELL_MARGIN ||
+      frame.top + sourceMetrics.baseline > CELL_HEIGHT - 1 - POSE_ATLAS_CELL_MARGIN
+    ) {
+      throw new Error(`desktop-poses.png pose ${index} cannot preserve the required ${POSE_ATLAS_CELL_MARGIN}px cell margin.`);
+    }
+    let occupied = 0;
+    let maxOccupiedY = -1;
+    for (let y = 0; y < frame.height; y += 1) {
+      const targetY = Math.floor(index / 4) * CELL_HEIGHT + frame.top + y;
+      for (let x = 0; x < frame.width; x += 1) {
+        const from = pixelOffset(x, y, frame.width);
+        if (frame.data[from + 3] === 0) continue;
+        occupied += 1;
+        maxOccupiedY = Math.max(maxOccupiedY, frame.top + y);
+        const targetX = (index % 4) * CELL_WIDTH + frame.left + x;
+        frame.data.copy(atlas, pixelOffset(targetX, targetY, width), from, from + 4);
+      }
+    }
+    if (occupied === 0) throw new Error(`desktop-poses.png pose ${index} is empty.`);
+    if (maxOccupiedY !== expectedBaseline) {
+      throw new Error(
+        `desktop-poses.png pose ${index} must end at y=${expectedBaseline}, got y=${maxOccupiedY}.`,
+      );
+    }
+  }
+  const desktopPoses = await sharp(atlas, { raw: { width, height, channels: 4 } })
+    .png({ palette: false, compressionLevel: 9 })
+    .toBuffer();
+  const metadata = await sharp(desktopPoses).metadata();
+  if (metadata.width !== width || metadata.height !== height) {
+    throw new Error(`desktop-poses.png must be ${width}x${height}, got ${metadata.width}x${metadata.height}.`);
+  }
+  return desktopPoses;
 }
 
 function resizeNearest(source, sourceWidth, sourceHeight, targetWidth, targetHeight) {
@@ -623,7 +952,9 @@ function createFrameRows(poseFrames = null) {
 
 export async function buildLocalAssets({ copyToPublic = true } = {}) {
   const approvedCoherentAtlas =
-    process.env.CODEX_PET_FORCE_PLACEHOLDER === "1" ? null : await resolveValidatedCoherentAtlas();
+    process.env.CODEX_PET_FORCE_PLACEHOLDER === "1" || process.env.CODEX_PET_FORCE_FALLBACK === "1"
+      ? null
+      : await resolveValidatedCoherentAtlas();
   const resolution = approvedCoherentAtlas
     ? {
         sourcePath: classicSourcePath,
@@ -637,95 +968,152 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
     console.log("No local classic-penguin source found; building the rights-safe placeholder pet.");
   }
 
-  await fs.mkdir(outputRoot, { recursive: true });
+  const localPaths = {
+    normalized: path.join(outputRoot, "pixel-base-normalized.png"),
+    spritesheet: path.join(outputRoot, manifest.spritesheetPath),
+    pngSpritesheet: path.join(outputRoot, "spritesheet.png"),
+    manifest: path.join(outputRoot, "pet.json"),
+    desktopPoses: path.join(outputRoot, "desktop-poses.png"),
+  };
+  const publicPaths = {
+    spritesheet: path.join(publicRoot, "spritesheet.webp"),
+    pngSpritesheet: path.join(publicRoot, "spritesheet.png"),
+    manifest: path.join(publicRoot, "pet.json"),
+    desktopPoses: path.join(publicRoot, "desktop-poses.png"),
+  };
+
+  // This is deliberately read-only. Every tree that may be mutated is checked
+  // before the first directory creation, temporary write, replacement, or delete.
+  const plannedTrees = await Promise.all([
+    preflightSafeOutputTree({
+      anchorPath: projectRoot,
+      rootPath: outputRoot,
+      outputPaths: Object.values(localPaths),
+      label: "Local generated pet assets",
+    }),
+    ...(copyToPublic
+      ? [
+          preflightSafeOutputTree({
+            anchorPath: projectRoot,
+            rootPath: publicRoot,
+            outputPaths: Object.values(publicPaths),
+            label: "Public generated pet assets",
+          }),
+        ]
+      : []),
+  ]);
+
   let base = null;
-  let normalizedPath = null;
+  let normalizedBuffer = null;
   try {
     await fs.access(sourcePath);
     base = await normalizeBase(sourcePath);
-    normalizedPath = path.join(outputRoot, "pixel-base-normalized.png");
-    await sharp(base.data, { raw: { width: base.width, height: base.height, channels: 4 } })
+    normalizedBuffer = await sharp(base.data, {
+      raw: { width: base.width, height: base.height, channels: 4 },
+    })
       .png({ palette: true, colours: 24, dither: 0 })
-      .toFile(normalizedPath);
+      .toBuffer();
   } catch (error) {
     if (!approvedCoherentAtlas || error?.code !== "ENOENT") throw error;
   }
 
-  if (approvedCoherentAtlas) {
-    const spritesheetPath = path.join(outputRoot, manifest.spritesheetPath);
-    const pngSpritesheetPath = path.join(outputRoot, "spritesheet.png");
-    await fs.copyFile(approvedCoherentAtlas, spritesheetPath);
-    await sharp(approvedCoherentAtlas).png({ palette: false, compressionLevel: 9 }).toFile(pngSpritesheetPath);
-    await fs.writeFile(path.join(outputRoot, "pet.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-
-    if (copyToPublic) {
-      await fs.mkdir(publicRoot, { recursive: true });
-      await fs.copyFile(spritesheetPath, path.join(publicRoot, "spritesheet.webp"));
-      await fs.copyFile(pngSpritesheetPath, path.join(publicRoot, "spritesheet.png"));
-      await fs.copyFile(path.join(outputRoot, "pet.json"), path.join(publicRoot, "pet.json"));
-    }
-
-    console.log(`Using validated coherent hatch-pet V2 atlas: ${approvedCoherentAtlas}`);
-    return {
-      built: true,
-      sourcePath,
-      atlasSourcePath: approvedCoherentAtlas,
-      outputRoot,
-      spritesheetPath,
-      pngSpritesheetPath,
-      normalizedPath,
-      petId: manifest.id,
-      usedPlaceholder,
-      usedCoherentAtlas: true,
-    };
-  }
-
-  if (!base) throw new Error(`A source image is required for fallback atlas generation: ${sourcePath}`);
-
   const poseFrames = usedPlaceholder ? null : await loadPoseFrames(classicPoseSheetPath);
-  if (poseFrames) {
-    console.log(`Using 16 local side/back/playful pose frames: ${classicPoseSheetPath}`);
+  let poseReferenceAtlas = approvedCoherentAtlas;
+  if (poseFrames && process.env.CODEX_PET_POSE_REFERENCE_ATLAS) {
+    poseReferenceAtlas = path.resolve(projectRoot, process.env.CODEX_PET_POSE_REFERENCE_ATLAS);
+    await realFileWithin(classicRoot, poseReferenceAtlas, "Desktop pose reference atlas");
+  }
+  const desktopPosesBuffer = poseFrames
+    ? await buildDesktopPoseAtlas(poseFrames, poseReferenceAtlas)
+    : null;
+  let spritesheetBuffer;
+  let pngSpritesheetBuffer;
+  if (approvedCoherentAtlas) {
+    spritesheetBuffer = await fs.readFile(approvedCoherentAtlas);
+    pngSpritesheetBuffer = await sharp(approvedCoherentAtlas)
+      .png({ palette: false, compressionLevel: 9 })
+      .toBuffer();
+  } else {
+    if (!base) throw new Error(`A source image is required for fallback atlas generation: ${sourcePath}`);
+    if (poseFrames) {
+      console.log(`Using 16 local side/back/playful pose frames: ${classicPoseSheetPath}`);
+    }
+    const atlas = Buffer.alloc(ATLAS_WIDTH * ATLAS_HEIGHT * 4);
+    const rows = createFrameRows(poseFrames);
+    rows.forEach((rowFrames, row) => {
+      rowFrames.forEach((spec, column) => compositeFrame(atlas, makeFrame(base, spec), column, row));
+    });
+
+    // Current official V2 validator requires a neutral QA frame in row 0, column 6.
+    compositeFrame(atlas, makeFrame(base), 6, 0);
+    const atlasImage = sharp(atlas, {
+      raw: { width: ATLAS_WIDTH, height: ATLAS_HEIGHT, channels: 4 },
+    });
+    [spritesheetBuffer, pngSpritesheetBuffer] = await Promise.all([
+      atlasImage.clone().webp({ lossless: true, quality: 100, alphaQuality: 100 }).toBuffer(),
+      atlasImage.clone().png({ palette: false, compressionLevel: 9 }).toBuffer(),
+    ]);
   }
 
-  const atlas = Buffer.alloc(ATLAS_WIDTH * ATLAS_HEIGHT * 4);
-  const rows = createFrameRows(poseFrames);
-  rows.forEach((rowFrames, row) => {
-    rowFrames.forEach((spec, column) => compositeFrame(atlas, makeFrame(base, spec), column, row));
-  });
-
-  // Current official V2 validator requires a neutral QA frame in row 0, column 6.
-  compositeFrame(atlas, makeFrame(base), 6, 0);
-
-  const spritesheetPath = path.join(outputRoot, manifest.spritesheetPath);
-  const atlasImage = sharp(atlas, {
-    raw: { width: ATLAS_WIDTH, height: ATLAS_HEIGHT, channels: 4 },
-  });
-  await atlasImage
-    .clone()
-    .webp({ lossless: true, quality: 100, alphaQuality: 100 })
-    .toFile(spritesheetPath);
-  const pngSpritesheetPath = path.join(outputRoot, "spritesheet.png");
-  await atlasImage.clone().png({ palette: false, compressionLevel: 9 }).toFile(pngSpritesheetPath);
-  await fs.writeFile(path.join(outputRoot, "pet.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-
-  if (copyToPublic) {
-    await fs.mkdir(publicRoot, { recursive: true });
-    await fs.copyFile(spritesheetPath, path.join(publicRoot, "spritesheet.webp"));
-    await fs.copyFile(pngSpritesheetPath, path.join(publicRoot, "spritesheet.png"));
-    await fs.copyFile(path.join(outputRoot, "pet.json"), path.join(publicRoot, "pet.json"));
+  const materializedTrees = [];
+  for (const tree of plannedTrees) materializedTrees.push(await materializeSafeOutputTree(tree));
+  const localTree = materializedTrees[0];
+  const publicTree = copyToPublic ? materializedTrees[1] : null;
+  const manifestContents = `${JSON.stringify(manifest, null, 2)}\n`;
+  const replacements = [
+    { output: safeOutputFrom(localTree, localPaths.spritesheet), contents: spritesheetBuffer },
+    { output: safeOutputFrom(localTree, localPaths.pngSpritesheet), contents: pngSpritesheetBuffer },
+    { output: safeOutputFrom(localTree, localPaths.manifest), contents: manifestContents },
+  ];
+  if (normalizedBuffer) {
+    replacements.push({ output: safeOutputFrom(localTree, localPaths.normalized), contents: normalizedBuffer });
   }
+  if (desktopPosesBuffer) {
+    replacements.push({ output: safeOutputFrom(localTree, localPaths.desktopPoses), contents: desktopPosesBuffer });
+  }
+  if (publicTree) {
+    replacements.push(
+      { output: safeOutputFrom(publicTree, publicPaths.spritesheet), contents: spritesheetBuffer },
+      { output: safeOutputFrom(publicTree, publicPaths.pngSpritesheet), contents: pngSpritesheetBuffer },
+      { output: safeOutputFrom(publicTree, publicPaths.manifest), contents: manifestContents },
+    );
+    if (desktopPosesBuffer) {
+      replacements.push({
+        output: safeOutputFrom(publicTree, publicPaths.desktopPoses),
+        contents: desktopPosesBuffer,
+      });
+    }
+  }
+  await atomicReplaceSafeOutputs(replacements);
 
-  console.log(`Built Codex Pet V2 atlas: ${spritesheetPath}`);
+  const staleOutputs = [];
+  if (!normalizedBuffer) staleOutputs.push(safeOutputFrom(localTree, localPaths.normalized));
+  if (!desktopPosesBuffer) {
+    staleOutputs.push(safeOutputFrom(localTree, localPaths.desktopPoses));
+    if (publicTree) staleOutputs.push(safeOutputFrom(publicTree, publicPaths.desktopPoses));
+  }
+  await removeSafeOutputs(staleOutputs);
+
+  const normalizedPath = normalizedBuffer ? localPaths.normalized : null;
+  const desktopPosesPath = desktopPosesBuffer ? localPaths.desktopPoses : null;
+  if (approvedCoherentAtlas) {
+    console.log(`Using validated coherent hatch-pet V2 atlas: ${approvedCoherentAtlas}`);
+  } else {
+    console.log(`Built Codex Pet V2 atlas: ${localPaths.spritesheet}`);
+  }
   return {
     built: true,
     sourcePath,
+    ...(approvedCoherentAtlas ? { atlasSourcePath: approvedCoherentAtlas } : {}),
     outputRoot,
-    spritesheetPath,
-    pngSpritesheetPath,
+    spritesheetPath: localPaths.spritesheet,
+    pngSpritesheetPath: localPaths.pngSpritesheet,
     normalizedPath,
     petId: manifest.id,
     usedPlaceholder,
-    usedCoherentAtlas: false,
+    usedCoherentAtlas: Boolean(approvedCoherentAtlas),
+    desktopPosesPath,
+    hasDesktopPoses: Boolean(desktopPosesPath),
   };
 }
 
