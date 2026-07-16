@@ -299,7 +299,10 @@ export async function prepareBackupDestination(petsRoot, petId, backupPath) {
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
-  return realCandidate;
+  // Keep the caller's lexical spelling (for example RUNNER~1) after the real
+  // parent has been verified. Mixing this with the canonical long spelling
+  // makes later child checks reject the same directory on Windows.
+  return candidate;
 }
 
 export async function resolveRestorableBackup(petsRoot, petId, backupPath) {

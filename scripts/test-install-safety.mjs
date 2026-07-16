@@ -71,7 +71,8 @@ try {
   const safeBackup = await prepareBackupDestination(petsRoot, petId, requestedBackup);
   await fs.mkdir(safeBackup);
   assert(
-    path.resolve(await resolveRestorableBackup(petsRoot, petId, safeBackup)) === path.resolve(safeBackup),
+    path.resolve(await resolveRestorableBackup(petsRoot, petId, safeBackup)) ===
+      path.resolve(await fs.realpath(safeBackup)),
     "A real backup under the current pet id must be restorable.",
   );
 
