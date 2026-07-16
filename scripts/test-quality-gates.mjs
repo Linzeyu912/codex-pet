@@ -353,6 +353,11 @@ assert.equal(blindDirectionReportPasses(relabeled), false, "source directions mu
 
 const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-pet-quality-gate-"));
 try {
+  const lexicalTemporaryRoot = path.resolve(temporaryRoot);
+  const realTemporaryRoot = await fs.realpath(temporaryRoot);
+  const exercisesWindowsShortPath =
+    process.platform === "win32" && lexicalTemporaryRoot.toLowerCase() !== realTemporaryRoot.toLowerCase();
+
   const guardedRoot = path.join(temporaryRoot, "guarded-run");
   const guardedQaRoot = path.join(guardedRoot, "qa");
   await fs.mkdir(guardedQaRoot, { recursive: true });
@@ -421,6 +426,49 @@ try {
     );
   }
 
+  const realAncestorContainer = path.join(temporaryRoot, "real-ancestor-container");
+  const linkedAncestorContainer = path.join(temporaryRoot, "linked-ancestor-container");
+  const realAncestorProject = path.join(realAncestorContainer, "project");
+  const realAncestorPublicParent = path.join(realAncestorProject, "public");
+  const ancestorSentinel = path.join(realAncestorContainer, "sentinel.txt");
+  await fs.mkdir(realAncestorPublicParent, { recursive: true });
+  await fs.writeFile(ancestorSentinel, "ancestor sentinel\n");
+  let ancestorLinkCreated = false;
+  try {
+    await fs.symlink(
+      realAncestorContainer,
+      linkedAncestorContainer,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    ancestorLinkCreated = true;
+  } catch (error) {
+    const safeSkip =
+      process.platform === "win32" &&
+      ["EPERM", "EACCES", "ENOSYS", "UNKNOWN"].includes(error?.code);
+    if (!safeSkip) throw error;
+    console.warn(`Anchor-ancestor junction regression safely skipped: ${error.code}`);
+  }
+  if (ancestorLinkCreated) {
+    const linkedAncestorProject = path.join(linkedAncestorContainer, "project");
+    const linkedAncestorOutputRoot = path.join(linkedAncestorProject, "public", "local");
+    await assert.rejects(
+      preflightSafeOutputTree({
+        anchorPath: linkedAncestorProject,
+        rootPath: linkedAncestorOutputRoot,
+        outputPaths: [path.join(linkedAncestorOutputRoot, "spritesheet.webp")],
+        label: "Linked ancestor generated assets",
+      }),
+      /symlink, junction, or reparse point|resolved through a junction/,
+      "a junction above the output anchor must be rejected even when it points to a sibling fixture",
+    );
+    assert.equal(await fs.readFile(ancestorSentinel, "utf8"), "ancestor sentinel\n");
+    assert.deepEqual(
+      await fs.readdir(realAncestorPublicParent),
+      [],
+      "ancestor-junction rejection must not create files through the linked project path",
+    );
+  }
+
   const generatedProject = path.join(temporaryRoot, "generated-project");
   const generatedLocalRoot = path.join(
     generatedProject,
@@ -459,6 +507,13 @@ try {
   ]);
   assert.equal(await fs.readFile(localWebp.targetPath, "utf8"), "old-local-atlas\n");
   assert.equal(await fs.readFile(publicWebp.targetPath, "utf8"), "old-public-atlas\n");
+  if (exercisesWindowsShortPath) {
+    assert.notEqual(
+      lexicalTemporaryRoot.toLowerCase(),
+      realTemporaryRoot.toLowerCase(),
+      "the hosted-runner fixture must retain its 8.3 alias while exercising safe output writes",
+    );
+  }
 
   await assert.rejects(
     atomicReplaceSafeOutputs([

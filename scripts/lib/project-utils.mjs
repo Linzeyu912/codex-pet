@@ -85,12 +85,45 @@ async function lstatIfPresent(filePath) {
   }
 }
 
+async function assertNoLinkedAncestorChain(filePath, label) {
+  const resolved = path.resolve(filePath);
+  const root = path.parse(resolved).root;
+  let current = root;
+  let realParent = await fs.realpath(root);
+  const rootStats = await lstatIfPresent(root);
+  if (!rootStats) return false;
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+    throw new Error(`${label} root must be a real directory: ${root}`);
+  }
+
+  const components = path.relative(root, resolved).split(path.sep).filter(Boolean);
+  for (const component of components) {
+    current = path.join(current, component);
+    const stats = await lstatIfPresent(current);
+    if (!stats) return false;
+    if (stats.isSymbolicLink()) {
+      throw new Error(`${label} path must not contain a symlink, junction, or reparse point: ${current}`);
+    }
+    if (!stats.isDirectory()) {
+      throw new Error(`${label} path component must be a real directory: ${current}`);
+    }
+    const realCurrent = await fs.realpath(current);
+    if (!samePath(path.dirname(realCurrent), realParent)) {
+      throw new Error(`${label} path resolved through a junction or reparse point: ${current} -> ${realCurrent}`);
+    }
+    realParent = realCurrent;
+  }
+  return true;
+}
+
 async function assertExistingPathChain(anchorPath, candidatePath, leafKind, label) {
   const anchor = path.resolve(anchorPath);
   const candidate = path.resolve(candidatePath);
   if (pathEscapes(anchor, candidate)) {
     throw new Error(`${label} escaped its expected parent root ${anchor}: ${candidate}`);
   }
+  if (!(await assertNoLinkedAncestorChain(anchor, label))) return false;
+  const realAnchor = await fs.realpath(anchor);
 
   const relative = path.relative(anchor, candidate);
   const components = relative ? relative.split(path.sep).filter(Boolean) : [];
@@ -112,7 +145,10 @@ async function assertExistingPathChain(anchorPath, candidatePath, leafKind, labe
     }
 
     const realCurrent = await fs.realpath(current);
-    if (!samePath(realCurrent, current)) {
+    const expectedRealCurrent = index === -1
+      ? realAnchor
+      : path.join(realAnchor, ...components.slice(0, index + 1));
+    if (!samePath(realCurrent, expectedRealCurrent)) {
       throw new Error(`${label} path resolved through a junction or reparse point: ${current} -> ${realCurrent}`);
     }
   }
@@ -193,6 +229,7 @@ export async function materializeSafeOutputTree(plan) {
     output.targetPath = path.join(realRoot, path.basename(output.requestedPath));
     output.anchorPath = refreshed.anchorPath;
     output.rootPath = refreshed.rootPath;
+    output.realRootPath = realRoot;
     output.label = refreshed.label;
   }
   return refreshed;
@@ -206,13 +243,21 @@ export function safeOutputFrom(plan, outputPath) {
 }
 
 async function validateSafeOutput(output) {
-  if (!output?.targetPath || !samePath(path.dirname(output.targetPath), output.rootPath)) {
+  if (
+    !output?.targetPath ||
+    !output?.realRootPath ||
+    !samePath(path.dirname(output.targetPath), output.realRootPath)
+  ) {
     throw new Error("Generated output descriptor is invalid.");
   }
   await assertExistingPathChain(output.anchorPath, output.rootPath, "directory", `${output.label} root`);
   await assertExistingPathChain(output.anchorPath, output.requestedPath, "file", `${output.label} target`);
-  const realRoot = await fs.realpath(output.rootPath);
-  if (!samePath(realRoot, output.rootPath) || !samePath(output.targetPath, output.requestedPath)) {
+  const currentRealRoot = await fs.realpath(output.rootPath);
+  const expectedTarget = path.join(currentRealRoot, path.basename(output.requestedPath));
+  if (
+    !samePath(currentRealRoot, output.realRootPath) ||
+    !samePath(output.targetPath, expectedTarget)
+  ) {
     throw new Error(`${output.label} target no longer resolves to its preflighted parent: ${output.requestedPath}`);
   }
 }
