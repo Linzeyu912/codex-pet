@@ -17,25 +17,15 @@ $atlasPaths = @(
     (Join-Path $atlasRoot 'spritesheet.webp'),
     (Join-Path $atlasRoot 'spritesheet.png')
 )
-function Get-Sha256([string]$Path) {
-    $stream = [IO.File]::OpenRead($Path)
-    $sha256 = [Security.Cryptography.SHA256]::Create()
-    try {
-        return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '')
-    } finally {
-        $sha256.Dispose()
-        $stream.Dispose()
-    }
-}
 if ($useCoherentAtlas) {
-    $builtWebp = $atlasPaths[0]
-    if (-not (Test-Path -LiteralPath $builtWebp)) {
-        throw "Generated coherent atlas not found: $builtWebp. Run 'pnpm assets:prepare' first."
-    }
-    $sourceHash = Get-Sha256 -Path $coherentAtlas
-    $builtHash = Get-Sha256 -Path $builtWebp
-    if ($sourceHash -ne $builtHash) {
-        throw "Generated atlas is stale and does not match the validated coherent source. Run 'pnpm assets:prepare' first."
+    # The local output adds deterministic repairs after the approved source
+    # atlas: a single left-front scarf panel and cyan-matte removal. Verify
+    # the exact expected outputs instead of requiring a raw byte-for-byte copy
+    # of the pre-repair source.
+    $node = (Get-Command node -ErrorAction Stop).Source
+    & $node (Join-Path $projectRoot 'scripts\check-local-atlas-freshness.mjs')
+    if ($LASTEXITCODE -ne 0) {
+        throw "Generated local atlas is stale. Run 'pnpm assets:prepare' first."
     }
 }
 $codexPackage = Get-AppxPackage OpenAI.Codex

@@ -12,7 +12,7 @@ import {
 import { renderBlindDirectionSheet } from "./lib/blind-sheet.mjs";
 import { readAtlasFrame } from "./lib/frame-analysis.mjs";
 import { POSE_ATLAS_CELL_MARGIN } from "./lib/pose-atlas-quality.mjs";
-import { auditChromaFringeFile } from "./remove-chroma-fringe.mjs";
+import { auditChromaFringeFile, removeBlueHaloRgba } from "./remove-chroma-fringe.mjs";
 import {
   atomicReplaceSafeOutputs,
   materializeSafeOutputTree,
@@ -837,6 +837,85 @@ function compositeFrame(atlas, frame, column, row) {
   }
 }
 
+function isScarfPanelTint(red, green, blue, alpha) {
+  // Covers the pale, red-tinted anti-aliasing around the panel as well as its
+  // opaque red core.  The range is restricted to the chest in the caller, so
+  // it cannot affect the orange beak or feet.
+  return alpha > 0 && red > green + 8 && red > blue + 8;
+}
+
+/**
+ * The front panel is attached at the viewer's left. It is visible while the
+ * penguin runs left, but the penguin's body hides it while running right.
+ * Both directions retain just one loose tail behind the body.
+ */
+function nearestBellyWhitePixel(source, cellLeft, cellTop, width, x, y) {
+  // The hidden panel sits directly over the white belly. A neutral-white
+  // sample on its row is a guard: collar pixels never receive this treatment.
+  for (let distance = 1; distance <= 72; distance += 1) {
+    for (const sampleX of [x + distance, x - distance]) {
+      if (sampleX < 0 || sampleX >= CELL_WIDTH) continue;
+      const sampleOffset = pixelOffset(cellLeft + sampleX, cellTop + y, width);
+      const red = source[sampleOffset];
+      const green = source[sampleOffset + 1];
+      const blue = source[sampleOffset + 2];
+      if (source[sampleOffset + 3] > 0
+        && red >= 220
+        && green >= 220
+        && blue >= 220
+        && Math.max(red, green, blue) - Math.min(red, green, blue) <= 8) return sampleOffset;
+    }
+  }
+  return null;
+}
+
+function occludeRunningRightScarfPanel(atlas, width) {
+  const source = Buffer.from(atlas);
+  const output = Buffer.from(atlas);
+  let occludedPixels = 0;
+  const row = 1;
+
+  for (let column = 0; column < ATLAS_COLUMNS; column += 1) {
+    const cellLeft = column * CELL_WIDTH;
+    const cellTop = row * CELL_HEIGHT;
+    // A white-belly donor is required, which naturally preserves the collar
+    // above the chest panel.  The loose rear tail is safely left of x=65.
+    for (let y = 112; y <= 166; y += 1) {
+      for (let x = 65; x <= 155; x += 1) {
+        const destination = pixelOffset(cellLeft + x, cellTop + y, width);
+        if (!isScarfPanelTint(
+          source[destination],
+          source[destination + 1],
+          source[destination + 2],
+          source[destination + 3],
+        )) continue;
+        const donor = nearestBellyWhitePixel(source, cellLeft, cellTop, width, x, y);
+        if (donor === null) continue;
+        output[destination] = 255;
+        output[destination + 1] = 255;
+        output[destination + 2] = 255;
+        output[destination + 3] = source[donor + 3];
+        occludedPixels += 1;
+      }
+    }
+  }
+
+  return { data: output, occludedPixels };
+}
+
+export async function repairCoherentAtlas(inputPath) {
+  const decoded = await sharp(inputPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const scarf = occludeRunningRightScarfPanel(decoded.data, decoded.info.width);
+  const blueHalo = removeBlueHaloRgba(scarf.data, decoded.info);
+  return {
+    data: blueHalo.data,
+    info: decoded.info,
+    scarfPanelPixelsOccluded: scarf.occludedPixels,
+    blueHaloPixelsRecolored: blueHalo.changedPixels,
+    blueHaloPixelsOutsideSafeEdge: blueHalo.unresolvedPixels,
+  };
+}
+
 function createFrameRows(poseFrames = null) {
   const fallbackRunningRight = [
     { shear: 2, dy: 0 },
@@ -1029,10 +1108,15 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
   let spritesheetBuffer;
   let pngSpritesheetBuffer;
   if (approvedCoherentAtlas) {
-    spritesheetBuffer = await fs.readFile(approvedCoherentAtlas);
-    pngSpritesheetBuffer = await sharp(approvedCoherentAtlas)
-      .png({ palette: false, compressionLevel: 9 })
-      .toBuffer();
+    const repaired = await repairCoherentAtlas(approvedCoherentAtlas);
+    const repairedAtlas = sharp(repaired.data, { raw: repaired.info });
+    [spritesheetBuffer, pngSpritesheetBuffer] = await Promise.all([
+      repairedAtlas.clone().webp({ lossless: true, quality: 100, alphaQuality: 100, effort: 6, exact: true }).toBuffer(),
+      repairedAtlas.clone().png({ palette: false, compressionLevel: 9 }).toBuffer(),
+    ]);
+    console.log(
+      `Repaired local atlas: occluded ${repaired.scarfPanelPixelsOccluded} right-running scarf-panel pixels and recolored ${repaired.blueHaloPixelsRecolored} blue-halo pixels; ${repaired.blueHaloPixelsOutsideSafeEdge} interior navy pixels were preserved.`,
+    );
   } else {
     if (!base) throw new Error(`A source image is required for fallback atlas generation: ${sourcePath}`);
     if (poseFrames) {

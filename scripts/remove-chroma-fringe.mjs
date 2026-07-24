@@ -21,6 +21,16 @@ export const DEFAULT_CHROMA_FRINGE_OPTIONS = Object.freeze({
   ...CODEX_ATLAS_GEOMETRY,
 });
 
+// Some image tools store a cyan matte in low-alpha edge pixels rather than the
+// exact #00FFFF chroma key.  The official validator cannot identify that
+// premultiplied spill by colour distance alone, so keep a second, deliberately
+// narrow detector for the rendered blue halo.
+export const DEFAULT_BLUE_HALO_OPTIONS = Object.freeze({
+  edgeRadius: 2,
+  sampleRadius: 14,
+  ...CODEX_ATLAS_GEOMETRY,
+});
+
 const MAX_SAMPLE_RADIUS = 16;
 const COMPARISON_SCALE = 4;
 const COMPARISON_CELL_LIMIT = 6;
@@ -69,6 +79,137 @@ function validateRaw(data, metadata, options) {
   if (data.length !== width * height * 4) {
     throw new Error(`RGBA byte length does not match ${width}x${height}.`);
   }
+}
+
+function normalizedBlueHaloOptions(options = {}) {
+  const merged = { ...DEFAULT_BLUE_HALO_OPTIONS, ...options };
+  for (const field of ["columns", "rows", "cellWidth", "cellHeight", "edgeRadius", "sampleRadius"]) {
+    if (!Number.isInteger(merged[field]) || merged[field] < (field === "edgeRadius" ? 0 : 1)) {
+      throw new Error(`${field} must be a ${field === "edgeRadius" ? "non-negative" : "positive"} integer.`);
+    }
+  }
+  return merged;
+}
+
+function isBlueHaloPixel(red, green, blue, alpha) {
+  if (alpha === 0 || green < 70 || blue < 70) return false;
+  // This captures the turquoise matte, including its premultiplied variants,
+  // while leaving the penguin's dark navy shading and all warm palette colours
+  // untouched.
+  return red * 1.5 < Math.min(green, blue) && blue / green >= 0.55 && blue / green <= 1.65;
+}
+
+function transparentOffsets(data, width, row, column, x, y, settings) {
+  const offsets = [];
+  for (let dy = -settings.edgeRadius; dy <= settings.edgeRadius; dy += 1) {
+    for (let dx = -settings.edgeRadius; dx <= settings.edgeRadius; dx += 1) {
+      const nearbyX = x + dx;
+      const nearbyY = y + dy;
+      if (nearbyX < 0 || nearbyY < 0 || nearbyX >= settings.cellWidth ||
+          nearbyY >= settings.cellHeight) continue;
+      const offset = (
+        (row * settings.cellHeight + nearbyY) * width +
+        column * settings.cellWidth + nearbyX
+      ) * 4;
+      if (data[offset + 3] === 0) offsets.push([nearbyX, nearbyY]);
+    }
+  }
+  return offsets;
+}
+
+function blueHaloInteriorSample(data, width, row, column, x, y, settings) {
+  const transparent = transparentOffsets(data, width, row, column, x, y, settings);
+
+  let inwardX = 0;
+  let inwardY = 0;
+  for (const [transparentX, transparentY] of transparent) {
+    inwardX += x - transparentX;
+    inwardY += y - transparentY;
+  }
+  const inwardLength = Math.hypot(inwardX, inwardY);
+  if (inwardLength > 0) {
+    inwardX /= inwardLength;
+    inwardY /= inwardLength;
+  }
+
+  const candidates = [];
+  for (let radius = 1; radius <= settings.sampleRadius; radius += 1) {
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+        const sampleX = x + dx;
+        const sampleY = y + dy;
+        if (sampleX < 0 || sampleY < 0 || sampleX >= settings.cellWidth || sampleY >= settings.cellHeight) {
+          continue;
+        }
+        const offset = (
+          (row * settings.cellHeight + sampleY) * width +
+          column * settings.cellWidth + sampleX
+        ) * 4;
+        const alpha = data[offset + 3];
+        if (alpha < 96 || isBlueHaloPixel(data[offset], data[offset + 1], data[offset + 2], alpha)) continue;
+        const distance = Math.hypot(dx, dy);
+        const alignment = inwardLength > 0 ? (dx * inwardX + dy * inwardY) / distance : 0;
+        if (inwardLength > 0 && alignment < -0.15) continue;
+        candidates.push({
+          offset,
+          score: distance * 100 - alignment * 14 - Math.min(alpha, 255) / 255,
+        });
+      }
+    }
+    if (candidates.length > 0) break;
+  }
+  candidates.sort((left, right) => left.score - right.score || left.offset - right.offset);
+  return candidates[0]?.offset ?? null;
+}
+
+/**
+ * Replace visible, premultiplied cyan matte pixels with a nearby interior
+ * palette colour. Alpha and geometry stay exactly unchanged.
+ */
+export function removeBlueHaloRgba(data, metadata, options = {}) {
+  const settings = normalizedBlueHaloOptions(options);
+  validateRaw(data, metadata, settings);
+  const output = Buffer.from(data);
+  const { width } = metadata;
+  let candidates = 0;
+  let changedPixels = 0;
+  let unresolvedPixels = 0;
+
+  for (let row = 0; row < settings.rows; row += 1) {
+    for (let column = 0; column < settings.columns; column += 1) {
+      for (let y = 0; y < settings.cellHeight; y += 1) {
+        for (let x = 0; x < settings.cellWidth; x += 1) {
+          const pixel = (row * settings.cellHeight + y) * width + column * settings.cellWidth + x;
+          const offset = pixel * 4;
+          if (!isBlueHaloPixel(data[offset], data[offset + 1], data[offset + 2], data[offset + 3])) continue;
+          const sampleOffset = blueHaloInteriorSample(data, width, row, column, x, y, settings);
+          if (sampleOffset === null) continue;
+          candidates += 1;
+          output[offset] = data[sampleOffset];
+          output[offset + 1] = data[sampleOffset + 1];
+          output[offset + 2] = data[sampleOffset + 2];
+          changedPixels += 1;
+        }
+      }
+    }
+  }
+
+  for (let row = 0; row < settings.rows; row += 1) {
+    for (let column = 0; column < settings.columns; column += 1) {
+      for (let y = 0; y < settings.cellHeight; y += 1) {
+        for (let x = 0; x < settings.cellWidth; x += 1) {
+          const pixel = (row * settings.cellHeight + y) * width + column * settings.cellWidth + x;
+          const offset = pixel * 4;
+          if (isBlueHaloPixel(output[offset], output[offset + 1], output[offset + 2], output[offset + 3])) {
+            unresolvedPixels += 1;
+          }
+        }
+      }
+    }
+  }
+
+  return { data: output, candidates, changedPixels, unresolvedPixels, options: settings };
 }
 
 /**

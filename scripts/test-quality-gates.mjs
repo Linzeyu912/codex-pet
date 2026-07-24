@@ -33,6 +33,7 @@ import {
 import {
   DEFAULT_CHROMA_FRINGE_OPTIONS,
   auditChromaFringeRgba,
+  removeBlueHaloRgba,
   removeChromaFringeRgba,
 } from "./remove-chroma-fringe.mjs";
 
@@ -147,6 +148,27 @@ assert.equal(
   lowAlphaCleanup.data[edgeChromaOffset + 3],
   1,
   "low-alpha cleanup must preserve the selected pixel's alpha",
+);
+
+const blueHaloFixture = Buffer.from(chromaFixture);
+blueHaloFixture[interiorChromaOffset] = 220;
+blueHaloFixture[interiorChromaOffset + 1] = 30;
+blueHaloFixture[interiorChromaOffset + 2] = 40;
+blueHaloFixture[edgeChromaOffset] = 0;
+blueHaloFixture[edgeChromaOffset + 1] = 127;
+blueHaloFixture[edgeChromaOffset + 2] = 127;
+blueHaloFixture[edgeChromaOffset + 3] = 64;
+const cleanedBlueHaloFixture = removeBlueHaloRgba(
+  blueHaloFixture,
+  chromaFixtureMetadata,
+  chromaFixtureOptions,
+);
+assert.equal(cleanedBlueHaloFixture.changedPixels, 1, "cyan matte should be recoloured from the local palette");
+assert.equal(cleanedBlueHaloFixture.unresolvedPixels, 0, "no cyan matte should survive the repair");
+assert.deepEqual(
+  [...cleanedBlueHaloFixture.data.subarray(edgeChromaOffset, edgeChromaOffset + 4)],
+  [220, 30, 40, 64],
+  "blue-halo repair must preserve alpha while replacing only the visible RGB fringe",
 );
 
 async function writePoseFixture(filePath, {
