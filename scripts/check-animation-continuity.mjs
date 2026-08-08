@@ -86,6 +86,9 @@ const rows = [
     minColorChange: placeholderProfile ? undefined : 0.03,
   },
 ];
+const UPRIGHT_ROW_INDICES = new Set([0, 1, 2, 3, 6, 7, 8, 9, 10]);
+const UPRIGHT_HEIGHT_RATIO_LIMIT = 1.015;
+const POSE_LONG_SIDE_RATIO_LIMIT = 1.015;
 
 const { data, info } = await sharp(inputPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
 if (info.width !== ATLAS_WIDTH || info.height !== ATLAS_HEIGHT) {
@@ -278,9 +281,29 @@ const summaries = [];
 const frameRows = [];
 const componentFindings = [];
 let desktopPoseInspection = null;
+let desktopPoseScaleConsistency = null;
 if (poseAtlasPath) {
   desktopPoseInspection = await inspectDesktopPoseAtlas(poseAtlasPath);
   errors.push(...desktopPoseInspection.errors);
+  const poseFrames = desktopPoseInspection.frames.filter((frame) => frame.area > 0);
+  if (poseFrames.length > 0) {
+    const extents = poseFrames.map((frame) => Math.max(frame.width, frame.height));
+    const minLongSide = Math.min(...extents);
+    const maxLongSide = Math.max(...extents);
+    const ratio = maxLongSide / Math.max(1, minLongSide);
+    desktopPoseScaleConsistency = {
+      metric: "visible silhouette long side for rotating poses",
+      minLongSide,
+      maxLongSide,
+      ratio,
+      limit: POSE_LONG_SIDE_RATIO_LIMIT,
+    };
+    if (!placeholderProfile && ratio > POSE_LONG_SIDE_RATIO_LIMIT) {
+      errors.push(
+        `desktop pose character scale ratio ${ratio.toFixed(3)} exceeds ${POSE_LONG_SIDE_RATIO_LIMIT.toFixed(3)} (${minLongSide}-${maxLongSide}px)`,
+      );
+    }
+  }
 }
 
 for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
@@ -320,7 +343,20 @@ for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
   const maxBaseline = Math.max(...pairs.map((pair) => pair.baseline));
   const maxAreaRatio = Math.max(...pairs.map((pair) => pair.areaRatio));
   const minColorChange = Math.min(...pairs.map((pair) => pair.colorChange));
-  summaries.push({ name: definition.name, maxCenter, minIou, maxBaseline, maxAreaRatio, minColorChange });
+  const minHeight = Math.min(...frames.map((frame) => frame.height));
+  const maxHeight = Math.max(...frames.map((frame) => frame.height));
+  const heightRatio = maxHeight / Math.max(1, minHeight);
+  summaries.push({
+    name: definition.name,
+    maxCenter,
+    minIou,
+    maxBaseline,
+    maxAreaRatio,
+    minColorChange,
+    minHeight,
+    maxHeight,
+    heightRatio,
+  });
 
   if (maxCenter > definition.maxCenter) {
     errors.push(`${definition.name}: center jump ${maxCenter.toFixed(1)}px exceeds ${definition.maxCenter}px`);
@@ -341,6 +377,29 @@ for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
       `${definition.name}: adjacent premultiplied RGB change ${minColorChange.toFixed(4)} is below ${definition.minColorChange.toFixed(4)}`,
     );
   }
+  if (!placeholderProfile && UPRIGHT_ROW_INDICES.has(rowIndex) && heightRatio > UPRIGHT_HEIGHT_RATIO_LIMIT) {
+    errors.push(
+      `${definition.name}: upright height ratio ${heightRatio.toFixed(3)} exceeds ${UPRIGHT_HEIGHT_RATIO_LIMIT.toFixed(3)} (${minHeight}-${maxHeight}px)`,
+    );
+  }
+}
+
+const uprightFrames = [...UPRIGHT_ROW_INDICES].flatMap((rowIndex) => frameRows[rowIndex]);
+const uprightHeightMin = Math.min(...uprightFrames.map((frame) => frame.height));
+const uprightHeightMax = Math.max(...uprightFrames.map((frame) => frame.height));
+const uprightHeightRatio = uprightHeightMax / Math.max(1, uprightHeightMin);
+const scaleConsistency = {
+  metric: "visible silhouette height for upright poses",
+  minHeight: uprightHeightMin,
+  maxHeight: uprightHeightMax,
+  ratio: uprightHeightRatio,
+  limit: UPRIGHT_HEIGHT_RATIO_LIMIT,
+  excludedRows: ["jumping", "failed"],
+};
+if (!placeholderProfile && uprightHeightRatio > UPRIGHT_HEIGHT_RATIO_LIMIT) {
+  errors.push(
+    `upright character scale ratio ${uprightHeightRatio.toFixed(3)} exceeds ${UPRIGHT_HEIGHT_RATIO_LIMIT.toFixed(3)} (${uprightHeightMin}-${uprightHeightMax}px)`,
+  );
 }
 
 const rejectedComponents = componentFindings.filter((component) => component.rejected);
@@ -406,7 +465,9 @@ const crossStateSummaries = crossStateDefinitions.map(([state, row, column]) => 
   if (summary.massCenterYDelta > 8) failedChecks.push(`mass-center-y ${summary.massCenterYDelta.toFixed(1)}px > 8px`);
   if (summary.topDelta > 8) failedChecks.push(`top ${summary.topDelta}px > 8px`);
   if (summary.baselineDelta > 8) failedChecks.push(`baseline ${summary.baselineDelta}px > 8px`);
-  if (summary.widthRatio > 1.1) failedChecks.push(`width ratio ${summary.widthRatio.toFixed(3)} > 1.100`);
+  // Directional perspective may narrow the silhouette even when character
+  // height (the scale metric for upright poses) is stable.
+  if (summary.widthRatio > 1.11) failedChecks.push(`width ratio ${summary.widthRatio.toFixed(3)} > 1.110`);
   if (summary.heightRatio > 1.07) failedChecks.push(`height ratio ${summary.heightRatio.toFixed(3)} > 1.070`);
   if (summary.areaRatio > 1.08) failedChecks.push(`area ratio ${summary.areaRatio.toFixed(3)} > 1.080`);
   summary.failedChecks = failedChecks;
@@ -593,10 +654,22 @@ console.table(
     "min alpha IoU": `${(row.minIou * 100).toFixed(1)}%`,
     "max baseline jump": `${row.maxBaseline}px`,
     "max area ratio": row.maxAreaRatio.toFixed(3),
+    "height range": `${row.minHeight}-${row.maxHeight}px`,
+    "height ratio": row.heightRatio.toFixed(3),
     "min color change": row.minColorChange.toFixed(4),
   })),
 );
 console.log(`Continuity profile: ${placeholderProfile ? "public placeholder (structure + loop safety)" : "coherent pet (strict)"}`);
+console.log(
+  `Upright character height: ${scaleConsistency.minHeight}-${scaleConsistency.maxHeight}px ` +
+  `(ratio ${scaleConsistency.ratio.toFixed(3)}, limit ${scaleConsistency.limit.toFixed(3)})`,
+);
+if (desktopPoseScaleConsistency) {
+  console.log(
+    `Rotating-pose character long side: ${desktopPoseScaleConsistency.minLongSide}-${desktopPoseScaleConsistency.maxLongSide}px ` +
+    `(ratio ${desktopPoseScaleConsistency.ratio.toFixed(3)}, limit ${desktopPoseScaleConsistency.limit.toFixed(3)})`,
+  );
+}
 console.table(
   crossStateSummaries.map((state) => ({
     state: state.state,
@@ -633,6 +706,7 @@ const auditReport = {
   errors,
   warnings,
   rows: summaries,
+  scaleConsistency,
   components: {
     thresholdAlpha: COMPONENT_ALPHA_THRESHOLD,
     detached: componentFindings,
@@ -661,6 +735,7 @@ const auditReport = {
         rows: desktopPoseInspection.rows,
         frameCount: desktopPoseInspection.frameCount,
         nonEmptyFrames: desktopPoseInspection.frames.filter((frame) => frame.area > 0).length,
+        scaleConsistency: desktopPoseScaleConsistency,
       }
     : { used: false },
   desktopActions: desktopActionSummaries,

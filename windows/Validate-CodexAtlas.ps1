@@ -19,9 +19,9 @@ $atlasPaths = @(
 )
 if ($useCoherentAtlas) {
     # The local output adds deterministic repairs after the approved source
-    # atlas: a single left-front scarf panel and cyan-matte removal. Verify
-    # the exact expected outputs instead of requiring a raw byte-for-byte copy
-    # of the pre-repair source.
+    # atlas: stable upright frame scale, a single left-front scarf panel, and
+    # cyan-matte removal. Verify the exact expected outputs instead of requiring
+    # a raw byte-for-byte copy of the pre-repair source.
     $node = (Get-Command node -ErrorAction Stop).Source
     & $node (Join-Path $projectRoot 'scripts\check-local-atlas-freshness.mjs')
     if ($LASTEXITCODE -ne 0) {

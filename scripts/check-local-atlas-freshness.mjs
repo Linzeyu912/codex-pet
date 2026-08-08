@@ -55,4 +55,6 @@ for (const target of targets) {
   }
 }
 
-console.log("Generated local atlas matches the validated source plus the deterministic scarf and blue-halo repair.");
+console.log(
+  "Generated local atlas matches the validated source plus deterministic scale, scarf, and blue-halo repairs.",
+);

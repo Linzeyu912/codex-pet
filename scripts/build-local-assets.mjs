@@ -35,6 +35,11 @@ const ATLAS_HEIGHT = CELL_HEIGHT * ATLAS_ROWS;
 const BASE_WIDTH = 160;
 const BASE_HEIGHT = 154;
 const BASELINE_Y = 188;
+const CHARACTER_UPRIGHT_HEIGHT = 181;
+const CHARACTER_POSE_LONG_SIDE = 181;
+// Jumping and failed/lying frames intentionally change silhouette height as
+// the body crouches or rotates. Upright rows should not change character scale.
+const MAIN_ATLAS_UPRIGHT_FRAME_COUNTS = Object.freeze([7, 8, 8, 4, 0, 0, 6, 6, 6, 8, 8]);
 const POSE_TARGET_AREA_RATIOS = Object.freeze([
   0.82, 0.82, 0.86, 0.84,
   0.82, 0.82, 0.86, 0.84,
@@ -636,7 +641,14 @@ async function buildDesktopPoseAtlas(poseFrames, referenceAtlasPath = null) {
       );
     }
   }
-  const desktopPoses = await sharp(atlas, { raw: { width, height, channels: 4 } })
+  const stabilized = normalizeAtlasFrameExtents(atlas, width, {
+    columns: 4,
+    rows: 4,
+    frameCounts: [4, 4, 4, 4],
+    metric: "long-side",
+    targetExtent: CHARACTER_POSE_LONG_SIDE,
+  });
+  const desktopPoses = await sharp(stabilized.data, { raw: { width, height, channels: 4 } })
     .png({ palette: false, compressionLevel: 9 })
     .toBuffer();
   const metadata = await sharp(desktopPoses).metadata();
@@ -658,6 +670,140 @@ function resizeNearest(source, sourceWidth, sourceHeight, targetWidth, targetHei
     }
   }
   return output;
+}
+
+function extractRawRegion(source, sourceWidth, left, top, width, height) {
+  const output = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sourceStart = pixelOffset(left, top + y, sourceWidth);
+    source.copy(output, y * width * 4, sourceStart, sourceStart + width * 4);
+  }
+  return output;
+}
+
+function clearRemoteLowAlphaPixels(data, width, height) {
+  const source = Buffer.from(data);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = pixelOffset(x, y, width);
+      const alpha = source[offset + 3];
+      if (alpha === 0 || alpha > 16) continue;
+      let nearVisibleBody = false;
+      for (let dy = -2; dy <= 2 && !nearVisibleBody; dy += 1) {
+        for (let dx = -2; dx <= 2; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const nearbyX = x + dx;
+          const nearbyY = y + dy;
+          if (nearbyX < 0 || nearbyY < 0 || nearbyX >= width || nearbyY >= height) continue;
+          if (source[pixelOffset(nearbyX, nearbyY, width) + 3] > 32) {
+            nearVisibleBody = true;
+            break;
+          }
+        }
+      }
+      if (!nearVisibleBody) clearPixel(data, offset);
+    }
+  }
+}
+
+function normalizeRawFrameExtent(frame, { metric, targetExtent }) {
+  const before = inspectRawPoseFrame(frame);
+  const beforeExtent = metric === "height" ? before.height : Math.max(before.width, before.height);
+  if (beforeExtent === targetExtent) {
+    return { frame: { ...frame, data: Buffer.from(frame.data) }, before, after: before, changed: false };
+  }
+
+  const scale = targetExtent / beforeExtent;
+  const padding = 2;
+  const cropLeft = Math.max(0, before.left - padding);
+  const cropTop = Math.max(0, before.top - padding);
+  const cropRight = Math.min(frame.width - 1, before.right + padding);
+  const cropBottom = Math.min(frame.height - 1, before.baseline + padding);
+  const cropWidth = cropRight - cropLeft + 1;
+  const cropHeight = cropBottom - cropTop + 1;
+  const crop = extractRawRegion(frame.data, frame.width, cropLeft, cropTop, cropWidth, cropHeight);
+  const targetWidth = Math.max(1, Math.round(cropWidth * scale));
+  const resizedHeight = Math.max(1, Math.round(cropHeight * scale));
+  const scaled = {
+    data: resizeNearest(crop, cropWidth, cropHeight, targetWidth, resizedHeight),
+    width: targetWidth,
+    height: resizedHeight,
+  };
+  const scaledMetrics = inspectRawPoseFrame(scaled);
+  const originalCenterX = (before.left + before.right) / 2;
+  const scaledCenterX = (scaledMetrics.left + scaledMetrics.right) / 2;
+  const targetLeft = Math.round(originalCenterX - scaledCenterX);
+  const targetTop = before.baseline - scaledMetrics.baseline;
+  if (
+    targetLeft < 0 ||
+    targetTop < 0 ||
+    targetLeft + scaled.width > frame.width ||
+    targetTop + scaled.height > frame.height
+  ) {
+    throw new Error(
+      `Cannot normalize ${before.width}x${before.height} frame to ${targetExtent}px by ${metric} without clipping ` +
+      `(placement ${targetLeft},${targetTop} ${scaled.width}x${scaled.height} in ${frame.width}x${frame.height}).`,
+    );
+  }
+
+  const output = Buffer.alloc(frame.width * frame.height * 4);
+  for (let y = 0; y < scaled.height; y += 1) {
+    const sourceStart = y * scaled.width * 4;
+    const destinationStart = pixelOffset(targetLeft, targetTop + y, frame.width);
+    scaled.data.copy(output, destinationStart, sourceStart, sourceStart + scaled.width * 4);
+  }
+  clearRemoteLowAlphaPixels(output, frame.width, frame.height);
+  const normalized = { data: output, width: frame.width, height: frame.height };
+  const after = inspectRawPoseFrame(normalized);
+  return { frame: normalized, before, after, changed: true };
+}
+
+function normalizeAtlasFrameExtents(atlas, atlasWidth, {
+  columns,
+  rows,
+  frameCounts,
+  metric,
+  targetExtent,
+}) {
+  if (frameCounts.length !== rows) throw new Error(`Expected ${rows} frame-count entries, got ${frameCounts.length}.`);
+  const output = Buffer.from(atlas);
+  const beforeExtents = [];
+  const afterExtents = [];
+  let changedFrames = 0;
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < frameCounts[row]; column += 1) {
+      if (column >= columns) throw new Error(`Frame count ${frameCounts[row]} exceeds ${columns} columns on row ${row}.`);
+      const cellLeft = column * CELL_WIDTH;
+      const cellTop = row * CELL_HEIGHT;
+      const cell = extractRawRegion(atlas, atlasWidth, cellLeft, cellTop, CELL_WIDTH, CELL_HEIGHT);
+      const normalized = normalizeRawFrameExtent(
+        { data: cell, width: CELL_WIDTH, height: CELL_HEIGHT },
+        { metric, targetExtent },
+      );
+      beforeExtents.push(
+        metric === "height" ? normalized.before.height : Math.max(normalized.before.width, normalized.before.height),
+      );
+      afterExtents.push(
+        metric === "height" ? normalized.after.height : Math.max(normalized.after.width, normalized.after.height),
+      );
+      if (normalized.changed) changedFrames += 1;
+      for (let y = 0; y < CELL_HEIGHT; y += 1) {
+        const sourceStart = y * CELL_WIDTH * 4;
+        const destinationStart = pixelOffset(cellLeft, cellTop + y, atlasWidth);
+        normalized.frame.data.copy(output, destinationStart, sourceStart, sourceStart + CELL_WIDTH * 4);
+      }
+    }
+  }
+  return {
+    data: output,
+    changedFrames,
+    beforeMin: Math.min(...beforeExtents),
+    beforeMax: Math.max(...beforeExtents),
+    afterMin: Math.min(...afterExtents),
+    afterMax: Math.max(...afterExtents),
+    metric,
+    targetExtent,
+  };
 }
 
 function flipHorizontal(source, width, height) {
@@ -907,12 +1053,24 @@ export async function repairCoherentAtlas(inputPath) {
   const decoded = await sharp(inputPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const scarf = occludeRunningRightScarfPanel(decoded.data, decoded.info.width);
   const blueHalo = removeBlueHaloRgba(scarf.data, decoded.info);
+  const stabilized = normalizeAtlasFrameExtents(blueHalo.data, decoded.info.width, {
+    columns: ATLAS_COLUMNS,
+    rows: ATLAS_ROWS,
+    frameCounts: MAIN_ATLAS_UPRIGHT_FRAME_COUNTS,
+    metric: "height",
+    targetExtent: CHARACTER_UPRIGHT_HEIGHT,
+  });
   return {
-    data: blueHalo.data,
+    data: stabilized.data,
     info: decoded.info,
     scarfPanelPixelsOccluded: scarf.occludedPixels,
     blueHaloPixelsRecolored: blueHalo.changedPixels,
     blueHaloPixelsOutsideSafeEdge: blueHalo.unresolvedPixels,
+    scaleChangedFrames: stabilized.changedFrames,
+    scaleBeforeMin: stabilized.beforeMin,
+    scaleBeforeMax: stabilized.beforeMax,
+    scaleAfterMin: stabilized.afterMin,
+    scaleAfterMax: stabilized.afterMax,
   };
 }
 
@@ -1115,7 +1273,7 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
       repairedAtlas.clone().png({ palette: false, compressionLevel: 9 }).toBuffer(),
     ]);
     console.log(
-      `Repaired local atlas: occluded ${repaired.scarfPanelPixelsOccluded} right-running scarf-panel pixels and recolored ${repaired.blueHaloPixelsRecolored} blue-halo pixels; ${repaired.blueHaloPixelsOutsideSafeEdge} interior navy pixels were preserved.`,
+      `Repaired local atlas: normalized ${repaired.scaleChangedFrames} upright frame heights from ${repaired.scaleBeforeMin}-${repaired.scaleBeforeMax}px to ${repaired.scaleAfterMin}-${repaired.scaleAfterMax}px; occluded ${repaired.scarfPanelPixelsOccluded} right-running scarf-panel pixels and recolored ${repaired.blueHaloPixelsRecolored} blue-halo pixels; ${repaired.blueHaloPixelsOutsideSafeEdge} interior navy pixels were preserved.`,
     );
   } else {
     if (!base) throw new Error(`A source image is required for fallback atlas generation: ${sourcePath}`);
