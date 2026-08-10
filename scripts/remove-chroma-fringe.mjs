@@ -94,9 +94,10 @@ function normalizedBlueHaloOptions(options = {}) {
 function isBlueHaloPixel(red, green, blue, alpha) {
   if (alpha === 0 || green < 70 || blue < 70) return false;
   // This captures the turquoise matte, including its premultiplied variants,
-  // while leaving the penguin's dark navy shading and all warm palette colours
-  // untouched.
-  return red * 1.5 < Math.min(green, blue) && blue / green >= 0.55 && blue / green <= 1.65;
+  // including the slightly bluer/greener edge remnants produced by lossless
+  // WebP decoding. The penguin's intended navy outline is substantially more
+  // blue-dominant than this range and remains untouched.
+  return red * 1.5 < Math.min(green, blue) && blue / green >= 0.45 && blue / green <= 2.1;
 }
 
 function transparentOffsets(data, width, row, column, x, y, settings) {

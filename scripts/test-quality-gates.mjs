@@ -171,6 +171,45 @@ assert.deepEqual(
   "blue-halo repair must preserve alpha while replacing only the visible RGB fringe",
 );
 
+const blueDominantHaloFixture = Buffer.from(chromaFixture);
+blueDominantHaloFixture[interiorChromaOffset] = 220;
+blueDominantHaloFixture[interiorChromaOffset + 1] = 30;
+blueDominantHaloFixture[interiorChromaOffset + 2] = 40;
+blueDominantHaloFixture[edgeChromaOffset] = 0;
+blueDominantHaloFixture[edgeChromaOffset + 1] = 85;
+blueDominantHaloFixture[edgeChromaOffset + 2] = 170;
+const cleanedBlueDominantHaloFixture = removeBlueHaloRgba(
+  blueDominantHaloFixture,
+  chromaFixtureMetadata,
+  chromaFixtureOptions,
+);
+assert.equal(
+  cleanedBlueDominantHaloFixture.unresolvedPixels,
+  0,
+  "blue-dominant matte remnants should not survive the repair",
+);
+assert.deepEqual(
+  [...cleanedBlueDominantHaloFixture.data.subarray(edgeChromaOffset, edgeChromaOffset + 4)],
+  [220, 30, 40, 255],
+  "blue-dominant edge matte should use the local interior palette",
+);
+
+const navyOutlineFixture = Buffer.from(blueDominantHaloFixture);
+navyOutlineFixture[edgeChromaOffset] = 5;
+navyOutlineFixture[edgeChromaOffset + 1] = 18;
+navyOutlineFixture[edgeChromaOffset + 2] = 50;
+const cleanedNavyOutlineFixture = removeBlueHaloRgba(
+  navyOutlineFixture,
+  chromaFixtureMetadata,
+  chromaFixtureOptions,
+);
+assert.equal(cleanedNavyOutlineFixture.changedPixels, 0, "intended navy outline must not be recoloured");
+assert.deepEqual(
+  [...cleanedNavyOutlineFixture.data.subarray(edgeChromaOffset, edgeChromaOffset + 4)],
+  [5, 18, 50, 255],
+  "intended navy outline should remain byte-for-byte unchanged",
+);
+
 async function writePoseFixture(filePath, {
   width = 768,
   height = 832,
