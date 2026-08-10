@@ -19,7 +19,7 @@ $atlasPaths = @(
 )
 if ($useCoherentAtlas) {
     # The local output adds deterministic repairs after the approved source
-    # atlas: stable upright frame scale, one anatomical right-chest scarf panel, and
+    # atlas: stable idle/hover upright scale, one anatomical right-chest scarf panel, and
     # cyan-matte removal. Verify the exact expected outputs instead of requiring
     # a raw byte-for-byte copy of the pre-repair source.
     $node = (Get-Command node -ErrorAction Stop).Source

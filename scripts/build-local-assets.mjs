@@ -37,9 +37,9 @@ const BASE_HEIGHT = 154;
 const BASELINE_Y = 188;
 const CHARACTER_UPRIGHT_HEIGHT = 181;
 const CHARACTER_POSE_LONG_SIDE = 181;
-// Jumping and failed/lying frames intentionally change silhouette height as
-// the body crouches or rotates. Upright rows should not change character scale.
-const MAIN_ATLAS_UPRIGHT_FRAME_COUNTS = Object.freeze([7, 8, 8, 4, 0, 0, 6, 6, 6, 8, 8]);
+// Hover-jump frames preserve the idle silhouette while moving vertically;
+// failed/lying frames rotate the body and remain excluded from upright scaling.
+const MAIN_ATLAS_UPRIGHT_FRAME_COUNTS = Object.freeze([7, 8, 8, 4, 5, 0, 6, 6, 6, 8, 8]);
 const POSE_TARGET_AREA_RATIOS = Object.freeze([
   0.82, 0.82, 0.86, 0.84,
   0.82, 0.82, 0.86, 0.84,
@@ -1150,12 +1150,68 @@ function auditRightChestScarf(atlas, width) {
   return { hiddenRightRunning, visibleLeftRunning, maxHiddenPanelPixels, minVisiblePanelPixels };
 }
 
+function stabilizeHoverJumpFrames(atlas, width) {
+  // Codex's desktop renderer switches to row 4 on pointer enter. Reuse the
+  // canonical idle pose at five vertical offsets so hover remains a jump, but
+  // the character (and especially its head) never changes scale.
+  const sourceFrame = extractRawRegion(atlas, width, 0, 0, CELL_WIDTH, CELL_HEIGHT);
+  const sourceMetrics = inspectRawPoseFrame({ data: sourceFrame, width: CELL_WIDTH, height: CELL_HEIGHT });
+  const offsetsY = [0, -7, -14, -7, 0];
+  const output = Buffer.from(atlas);
+  const centersY = [];
+  const heights = [];
+
+  for (let column = 0; column < offsetsY.length; column += 1) {
+    const cellLeft = column * CELL_WIDTH;
+    const cellTop = 4 * CELL_HEIGHT;
+    for (let y = 0; y < CELL_HEIGHT; y += 1) {
+      output.fill(0, pixelOffset(cellLeft, cellTop + y, width), pixelOffset(cellLeft + CELL_WIDTH, cellTop + y, width));
+    }
+
+    const offsetY = offsetsY[column];
+    for (let y = 0; y < CELL_HEIGHT; y += 1) {
+      const targetY = y + offsetY;
+      if (targetY < 0 || targetY >= CELL_HEIGHT) continue;
+      const sourceStart = y * CELL_WIDTH * 4;
+      const destinationStart = pixelOffset(cellLeft, cellTop + targetY, width);
+      sourceFrame.copy(output, destinationStart, sourceStart, sourceStart + CELL_WIDTH * 4);
+    }
+
+    const renderedFrame = extractRawRegion(output, width, cellLeft, cellTop, CELL_WIDTH, CELL_HEIGHT);
+    const metrics = inspectRawPoseFrame({ data: renderedFrame, width: CELL_WIDTH, height: CELL_HEIGHT });
+    if (metrics.width !== sourceMetrics.width || metrics.height !== sourceMetrics.height) {
+      throw new Error(
+        `Hover jump frame ${column} changed the canonical ${sourceMetrics.width}x${sourceMetrics.height}px scale ` +
+        `to ${metrics.width}x${metrics.height}px.`,
+      );
+    }
+    centersY.push(metrics.centerY);
+    heights.push(metrics.height);
+  }
+
+  const risesThenFalls = centersY[0] > centersY[1]
+    && centersY[1] > centersY[2]
+    && centersY[2] < centersY[3]
+    && centersY[3] < centersY[4];
+  if (!risesThenFalls || centersY[0] !== centersY[4] || centersY[1] !== centersY[3]) {
+    throw new Error(`Hover jump must preserve a symmetric vertical arc, got y=[${centersY.join(", ")}].`);
+  }
+  return {
+    data: output,
+    offsetsY,
+    centersY,
+    minHeight: Math.min(...heights),
+    maxHeight: Math.max(...heights),
+  };
+}
+
 export async function repairCoherentAtlas(inputPath) {
   const decoded = await sharp(inputPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const scarf = occludeRunningRightScarfPanel(decoded.data, decoded.info.width);
   const scarfAudit = auditRightChestScarf(scarf.data, decoded.info.width);
   const blueHalo = removeBlueHaloRgba(scarf.data, decoded.info);
-  const stabilized = normalizeAtlasFrameExtents(blueHalo.data, decoded.info.width, {
+  const hoverJump = stabilizeHoverJumpFrames(blueHalo.data, decoded.info.width);
+  const stabilized = normalizeAtlasFrameExtents(hoverJump.data, decoded.info.width, {
     columns: ATLAS_COLUMNS,
     rows: ATLAS_ROWS,
     frameCounts: MAIN_ATLAS_UPRIGHT_FRAME_COUNTS,
@@ -1168,6 +1224,10 @@ export async function repairCoherentAtlas(inputPath) {
     scarfPanelPixelsOccluded: scarf.occludedPixels,
     scarfMaxHiddenPanelPixels: scarfAudit.maxHiddenPanelPixels,
     scarfMinVisiblePanelPixels: scarfAudit.minVisiblePanelPixels,
+    hoverJumpOffsetsY: hoverJump.offsetsY,
+    hoverJumpCentersY: hoverJump.centersY,
+    hoverJumpMinHeight: hoverJump.minHeight,
+    hoverJumpMaxHeight: hoverJump.maxHeight,
     blueHaloPixelsRecolored: blueHalo.changedPixels,
     blueHaloPixelsOutsideSafeEdge: blueHalo.unresolvedPixels,
     scaleChangedFrames: stabilized.changedFrames,
@@ -1377,7 +1437,7 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
       repairedAtlas.clone().png({ palette: false, compressionLevel: 9 }).toBuffer(),
     ]);
     console.log(
-      `Repaired local atlas: normalized ${repaired.scaleChangedFrames} upright frame heights from ${repaired.scaleBeforeMin}-${repaired.scaleBeforeMax}px to ${repaired.scaleAfterMin}-${repaired.scaleAfterMax}px; occluded ${repaired.scarfPanelPixelsOccluded} right-running right-chest scarf-panel pixels (hidden max ${repaired.scarfMaxHiddenPanelPixels}, visible opposite-direction min ${repaired.scarfMinVisiblePanelPixels}) and recolored ${repaired.blueHaloPixelsRecolored} blue-halo pixels; ${repaired.blueHaloPixelsOutsideSafeEdge} interior navy pixels were preserved.`,
+      `Repaired local atlas: normalized ${repaired.scaleChangedFrames} upright frame heights from ${repaired.scaleBeforeMin}-${repaired.scaleBeforeMax}px to ${repaired.scaleAfterMin}-${repaired.scaleAfterMax}px; stabilized hover-jump frames at ${repaired.hoverJumpMinHeight}-${repaired.hoverJumpMaxHeight}px on y=[${repaired.hoverJumpCentersY.map((value) => value.toFixed(1)).join(",")}]; occluded ${repaired.scarfPanelPixelsOccluded} right-running right-chest scarf-panel pixels (hidden max ${repaired.scarfMaxHiddenPanelPixels}, visible opposite-direction min ${repaired.scarfMinVisiblePanelPixels}) and recolored ${repaired.blueHaloPixelsRecolored} blue-halo pixels; ${repaired.blueHaloPixelsOutsideSafeEdge} interior navy pixels were preserved.`,
     );
   } else {
     if (!base) throw new Error(`A source image is required for fallback atlas generation: ${sourcePath}`);

@@ -86,7 +86,7 @@ const rows = [
     minColorChange: placeholderProfile ? undefined : 0.03,
   },
 ];
-const UPRIGHT_ROW_INDICES = new Set([0, 1, 2, 3, 6, 7, 8, 9, 10]);
+const UPRIGHT_ROW_INDICES = new Set([0, 1, 2, 3, 4, 6, 7, 8, 9, 10]);
 const UPRIGHT_HEIGHT_RATIO_LIMIT = 1.015;
 const POSE_LONG_SIDE_RATIO_LIMIT = 1.015;
 
@@ -275,6 +275,34 @@ function compare(first, second) {
   };
 }
 
+function translatedPixelMismatches(reference, candidate, offsetY) {
+  let mismatches = 0;
+  for (let y = 0; y < CELL_HEIGHT; y += 1) {
+    const referenceY = y - offsetY;
+    for (let x = 0; x < CELL_WIDTH; x += 1) {
+      const candidateIndex = y * CELL_WIDTH + x;
+      const referenceIndex = referenceY >= 0 && referenceY < CELL_HEIGHT
+        ? referenceY * CELL_WIDTH + x
+        : -1;
+      const expectedAlpha = referenceIndex >= 0 ? reference.alpha[referenceIndex] : 0;
+      if (candidate.alpha[candidateIndex] !== expectedAlpha) {
+        mismatches += 1;
+        continue;
+      }
+      const candidateColor = candidateIndex * 3;
+      const referenceColor = referenceIndex * 3;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const expected = referenceIndex >= 0 ? reference.premultipliedRgb[referenceColor + channel] : 0;
+        if (candidate.premultipliedRgb[candidateColor + channel] !== expected) {
+          mismatches += 1;
+          break;
+        }
+      }
+    }
+  }
+  return mismatches;
+}
+
 const errors = [];
 const warnings = [];
 const summaries = [];
@@ -394,7 +422,7 @@ const scaleConsistency = {
   maxHeight: uprightHeightMax,
   ratio: uprightHeightRatio,
   limit: UPRIGHT_HEIGHT_RATIO_LIMIT,
-  excludedRows: ["jumping", "failed"],
+  excludedRows: ["failed"],
 };
 if (!placeholderProfile && uprightHeightRatio > UPRIGHT_HEIGHT_RATIO_LIMIT) {
   errors.push(
@@ -583,7 +611,24 @@ if (placeholderProfile) {
   }
 }
 
+const idleBoundaryFrame = frameRows[0][0];
 const jumpFrames = frameRows[4];
+const hoverJumpOffsetsY = [0, -7, -14, -7, 0];
+const hoverJumpPixelMismatches = jumpFrames.map((frame, index) =>
+  translatedPixelMismatches(idleBoundaryFrame, frame, hoverJumpOffsetsY[index]),
+);
+if (!placeholderProfile && hoverJumpPixelMismatches.some((count) => count !== 0)) {
+  errors.push(
+    `jumping: hover frames must be exact translated idle copies, got mismatches=[${hoverJumpPixelMismatches.join(", ")}]`,
+  );
+}
+const hoverJumpAudit = {
+  rendererTrigger: "pointer-enter -> jumping row 4",
+  reference: { state: "idle", row: 0, column: 0 },
+  offsetsY: hoverJumpOffsetsY,
+  pixelMismatches: hoverJumpPixelMismatches,
+  exactTranslatedIdleCopies: hoverJumpPixelMismatches.every((count) => count === 0),
+};
 const jumpY = jumpFrames.map((frame) => frame.centerY);
 const jumpX = jumpFrames.map((frame) => frame.centerX);
 const jumpRisesThenFalls = jumpY[0] > jumpY[1] && jumpY[1] > jumpY[2] && jumpY[2] < jumpY[3] && jumpY[3] < jumpY[4];
@@ -608,7 +653,6 @@ if (jumpLanding.center > 3 || jumpLanding.iou < 0.85 || jumpLanding.baseline > 3
   );
 }
 
-const idleBoundaryFrame = frameRows[0][0];
 const withIdleBoundary = (name, frames) => ({
   name,
   playback: [idleBoundaryFrame, ...frames, idleBoundaryFrame],
@@ -717,6 +761,7 @@ const auditReport = {
     description: "Silhouette top, mass centre, ground baseline, width, height and occupied area are geometric proxies for shared character landmarks.",
     states: crossStateSummaries,
   },
+  hoverResponse: hoverJumpAudit,
   directions: {
     labels: directionLabels,
     medianChangedPixels: directionMedianChange,
