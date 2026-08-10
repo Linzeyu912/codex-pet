@@ -56,5 +56,5 @@ for (const target of targets) {
 }
 
 console.log(
-  "Generated local atlas matches the validated source plus deterministic idle/hover scale, right-chest scarf, and blue-halo repairs.",
+  "Generated local atlas matches the validated source plus deterministic idle/hover scale, directional transparent-scarf deletion, and blue-halo repairs.",
 );

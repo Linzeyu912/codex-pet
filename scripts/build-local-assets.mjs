@@ -997,16 +997,11 @@ function isWarmOrNeutralScarfEdge(red, green, blue, alpha) {
   return alpha > 0 && red >= green && red >= blue;
 }
 
-/**
- * The front panel is attached to the penguin's anatomical right chest (the
- * viewer's left in the front-facing pose). It is visible while the penguin
- * runs left, but the penguin's body hides it while running right. Both
- * directions retain just one loose tail behind the body.
- */
-function nearestBellyWhitePixel(source, cellLeft, cellTop, width, x, y) {
-  // The hidden panel sits directly over the white belly. A neutral-white
-  // sample on its row is a guard: collar pixels never receive this treatment.
-  for (let distance = 1; distance <= 72; distance += 1) {
+function nearestNavyBodyPixel(source, cellLeft, cellTop, width, x, y) {
+  // In running-left, the body that occludes the panel is immediately to its
+  // right. Begin well inside that flank rather than cloning its outline; the
+  // translated sample keeps the subtle source shading without horizontal bands.
+  for (let distance = 36; distance <= 72; distance += 1) {
     for (const sampleX of [x + distance, x - distance]) {
       if (sampleX < 0 || sampleX >= CELL_WIDTH) continue;
       const sampleOffset = pixelOffset(cellLeft + sampleX, cellTop + y, width);
@@ -1014,47 +1009,72 @@ function nearestBellyWhitePixel(source, cellLeft, cellTop, width, x, y) {
       const green = source[sampleOffset + 1];
       const blue = source[sampleOffset + 2];
       if (source[sampleOffset + 3] > 0
-        && red >= 220
-        && green >= 220
-        && blue >= 220
-        && Math.max(red, green, blue) - Math.min(red, green, blue) <= 8) return sampleOffset;
+        && red < 70
+        && green < 90
+        && blue < 140
+        && blue >= red
+        && blue >= green) return sampleOffset;
     }
   }
   return null;
 }
 
-function occludeRunningRightScarfPanel(atlas, width) {
+/**
+ * Keep the source's front panel in running-right (row 1). The mirrored panel
+ * in running-left (row 2) is the duplicate that should be hidden by the body.
+ * Both directions retain the separate loose tail behind the body.
+ */
+export function deleteRunningLeftScarfPanel(atlas, width) {
   const source = Buffer.from(atlas);
   const output = Buffer.from(atlas);
-  let occludedPixels = 0;
-  const row = 1;
+  let deletedPixels = 0;
+  let opaqueDeletedPixels = 0;
+  let bodyBackingPixels = 0;
+  let fallbackBodyBackingPixels = 0;
+  let transparentDeletedPixels = 0;
+  let whiteReplacementPixels = 0;
+  const row = 2;
 
   for (let column = 0; column < ATLAS_COLUMNS; column += 1) {
     const cellLeft = column * CELL_WIDTH;
     const cellTop = row * CELL_HEIGHT;
     const panelMask = new Uint8Array(CELL_WIDTH * CELL_HEIGHT);
-    // A white-belly donor is required, which naturally preserves the collar
-    // above the chest panel.  The loose rear tail is safely left of x=65.
-    for (let y = 112; y <= 166; y += 1) {
-      for (let x = 65; x <= 155; x += 1) {
+    const deletedMask = new Uint8Array(CELL_WIDTH * CELL_HEIGHT);
+    let collarBottom = 0;
+    for (let y = 70; y < 150; y += 1) {
+      let redPixels = 0;
+      for (let x = 60; x <= 160; x += 1) {
+        const offset = pixelOffset(cellLeft + x, cellTop + y, width);
+        if (isScarfPanelTint(
+          source[offset],
+          source[offset + 1],
+          source[offset + 2],
+          source[offset + 3],
+        ) && source[offset + 1] < 100) redPixels += 1;
+      }
+      if (redPixels >= 40) collarBottom = y;
+    }
+
+    // Start below the horizontal collar. The mirrored x bounds preserve the
+    // separate rear tail, and the dark-red guard excludes orange feet.
+    for (let y = collarBottom + 2; y <= 166; y += 1) {
+      for (let x = 36; x <= 126; x += 1) {
         const destination = pixelOffset(cellLeft + x, cellTop + y, width);
         if (!isScarfPanelTint(
           source[destination],
           source[destination + 1],
           source[destination + 2],
           source[destination + 3],
-        )) continue;
-        const donor = nearestBellyWhitePixel(source, cellLeft, cellTop, width, x, y);
-        if (donor === null) continue;
+        ) || source[destination + 1] >= 100) continue;
         panelMask[y * CELL_WIDTH + x] = 1;
       }
     }
 
-    // Expand from the opaque panel core to include its pale pink fringe. This
-    // prevents the hidden right-running panel from surviving as a faint line
-    // on the white belly while keeping the horizontal collar and rear tail.
-    for (let y = 110; y <= 168; y += 1) {
-      for (let x = 63; x <= 157; x += 1) {
+    // Expand from the opaque panel core to include its pale pink fringe. Every
+    // selected pixel becomes transparent: the hidden flap is deleted instead
+    // of being painted white, while the horizontal collar and rear tail remain.
+    for (let y = collarBottom; y <= 168; y += 1) {
+      for (let x = 34; x <= 128; x += 1) {
         let nearPanel = false;
         for (let dy = -2; dy <= 2 && !nearPanel; dy += 1) {
           for (let dx = -2; dx <= 2; dx += 1) {
@@ -1076,25 +1096,68 @@ function occludeRunningRightScarfPanel(atlas, width) {
           source[destination + 2],
           source[destination + 3],
         )) continue;
-        const donor = nearestBellyWhitePixel(source, cellLeft, cellTop, width, x, y);
-        if (donor === null) continue;
-        const changed = output[destination] !== 255
-          || output[destination + 1] !== 255
-          || output[destination + 2] !== 255
-          || output[destination + 3] !== source[donor + 3];
-        output[destination] = 255;
-        output[destination + 1] = 255;
-        output[destination + 2] = 255;
-        output[destination + 3] = source[donor + 3];
-        if (changed) occludedPixels += 1;
+        const changed = output[destination] !== 0
+          || output[destination + 1] !== 0
+          || output[destination + 2] !== 0
+          || output[destination + 3] !== 0;
+        output.fill(0, destination, destination + 4);
+        deletedMask[y * CELL_WIDTH + x] = 1;
+        if (changed) deletedPixels += 1;
+        if (output[destination + 3] !== 0) opaqueDeletedPixels += 1;
+      }
+    }
+
+    // The atlas is flattened, so clearing the scarf also exposes the pixels
+    // where the body should occlude it. Restore only a navy body backing from
+    // neighbouring body pixels; never substitute belly white for the scarf.
+    for (let y = collarBottom; y <= 168; y += 1) {
+      for (let x = 34; x <= 128; x += 1) {
+        if (deletedMask[y * CELL_WIDTH + x] !== 1) continue;
+        const destination = pixelOffset(cellLeft + x, cellTop + y, width);
+        const donor = nearestNavyBodyPixel(source, cellLeft, cellTop, width, x, y);
+        if (donor === null) {
+          output[destination] = 15;
+          output[destination + 1] = 18;
+          output[destination + 2] = 42;
+          output[destination + 3] = 255;
+          fallbackBodyBackingPixels += 1;
+        } else {
+          source.copy(output, destination, donor, donor + 4);
+        }
+        bodyBackingPixels += 1;
+        if (output[destination + 3] === 0) transparentDeletedPixels += 1;
+        const red = output[destination];
+        const green = output[destination + 1];
+        const blue = output[destination + 2];
+        if (red >= 220 && green >= 220 && blue >= 220) whiteReplacementPixels += 1;
       }
     }
   }
 
-  return { data: output, occludedPixels };
+  if (deletedPixels < 8_000) {
+    throw new Error(`Running-left scarf deletion found only ${deletedPixels} panel pixels.`);
+  }
+  if (opaqueDeletedPixels !== 0) {
+    throw new Error(`${opaqueDeletedPixels} deleted running-left scarf pixels remain opaque.`);
+  }
+  if (whiteReplacementPixels !== 0) {
+    throw new Error(`${whiteReplacementPixels} running-left scarf pixels were incorrectly replaced with white.`);
+  }
+  if (transparentDeletedPixels !== 0) {
+    throw new Error(`${transparentDeletedPixels} running-left body-backing pixels remain transparent.`);
+  }
+  return {
+    data: output,
+    deletedPixels,
+    opaqueDeletedPixels,
+    bodyBackingPixels,
+    fallbackBodyBackingPixels,
+    transparentDeletedPixels,
+    whiteReplacementPixels,
+  };
 }
 
-function auditRightChestScarf(atlas, width) {
+export function auditDirectionalScarf(atlas, width) {
   const panelCounts = new Map();
   for (const row of [1, 2]) {
     const counts = [];
@@ -1133,21 +1196,21 @@ function auditRightChestScarf(atlas, width) {
     panelCounts.set(row, counts);
   }
 
-  const hiddenRightRunning = panelCounts.get(1);
-  const visibleLeftRunning = panelCounts.get(2);
-  const maxHiddenPanelPixels = Math.max(...hiddenRightRunning);
-  const minVisiblePanelPixels = Math.min(...visibleLeftRunning);
+  const visibleRightRunning = panelCounts.get(1);
+  const hiddenLeftRunning = panelCounts.get(2);
+  const maxHiddenPanelPixels = Math.max(...hiddenLeftRunning);
+  const minVisiblePanelPixels = Math.min(...visibleRightRunning);
   if (maxHiddenPanelPixels > 8) {
     throw new Error(
-      `Right-running frames retain ${maxHiddenPanelPixels} right-chest panel pixels; expected at most 8.`,
+      `Left-running frames retain ${maxHiddenPanelPixels} hidden scarf-panel pixels; expected at most 8.`,
     );
   }
   if (minVisiblePanelPixels < 400) {
     throw new Error(
-      `Left-running frames retain only ${minVisiblePanelPixels} right-chest panel pixels; expected at least 400.`,
+      `Right-running frames retain only ${minVisiblePanelPixels} visible scarf-panel pixels; expected at least 400.`,
     );
   }
-  return { hiddenRightRunning, visibleLeftRunning, maxHiddenPanelPixels, minVisiblePanelPixels };
+  return { hiddenLeftRunning, visibleRightRunning, maxHiddenPanelPixels, minVisiblePanelPixels };
 }
 
 function stabilizeHoverJumpFrames(atlas, width) {
@@ -1207,8 +1270,7 @@ function stabilizeHoverJumpFrames(atlas, width) {
 
 export async function repairCoherentAtlas(inputPath) {
   const decoded = await sharp(inputPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const scarf = occludeRunningRightScarfPanel(decoded.data, decoded.info.width);
-  const scarfAudit = auditRightChestScarf(scarf.data, decoded.info.width);
+  const scarf = deleteRunningLeftScarfPanel(decoded.data, decoded.info.width);
   const blueHalo = removeBlueHaloRgba(scarf.data, decoded.info);
   const hoverJump = stabilizeHoverJumpFrames(blueHalo.data, decoded.info.width);
   const stabilized = normalizeAtlasFrameExtents(hoverJump.data, decoded.info.width, {
@@ -1218,10 +1280,16 @@ export async function repairCoherentAtlas(inputPath) {
     metric: "height",
     targetExtent: CHARACTER_UPRIGHT_HEIGHT,
   });
+  const scarfAudit = auditDirectionalScarf(stabilized.data, decoded.info.width);
   return {
     data: stabilized.data,
     info: decoded.info,
-    scarfPanelPixelsOccluded: scarf.occludedPixels,
+    scarfPanelPixelsDeleted: scarf.deletedPixels,
+    scarfDeletedPixelsStillOpaque: scarf.opaqueDeletedPixels,
+    scarfBodyBackingPixels: scarf.bodyBackingPixels,
+    scarfFallbackBodyBackingPixels: scarf.fallbackBodyBackingPixels,
+    scarfTransparentDeletedPixels: scarf.transparentDeletedPixels,
+    scarfWhiteReplacementPixels: scarf.whiteReplacementPixels,
     scarfMaxHiddenPanelPixels: scarfAudit.maxHiddenPanelPixels,
     scarfMinVisiblePanelPixels: scarfAudit.minVisiblePanelPixels,
     hoverJumpOffsetsY: hoverJump.offsetsY,
@@ -1437,7 +1505,7 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
       repairedAtlas.clone().png({ palette: false, compressionLevel: 9 }).toBuffer(),
     ]);
     console.log(
-      `Repaired local atlas: normalized ${repaired.scaleChangedFrames} upright frame heights from ${repaired.scaleBeforeMin}-${repaired.scaleBeforeMax}px to ${repaired.scaleAfterMin}-${repaired.scaleAfterMax}px; stabilized hover-jump frames at ${repaired.hoverJumpMinHeight}-${repaired.hoverJumpMaxHeight}px on y=[${repaired.hoverJumpCentersY.map((value) => value.toFixed(1)).join(",")}]; occluded ${repaired.scarfPanelPixelsOccluded} right-running right-chest scarf-panel pixels (hidden max ${repaired.scarfMaxHiddenPanelPixels}, visible opposite-direction min ${repaired.scarfMinVisiblePanelPixels}) and recolored ${repaired.blueHaloPixelsRecolored} blue-halo pixels; ${repaired.blueHaloPixelsOutsideSafeEdge} interior navy pixels were preserved.`,
+      `Repaired local atlas: normalized ${repaired.scaleChangedFrames} upright frame heights from ${repaired.scaleBeforeMin}-${repaired.scaleBeforeMax}px to ${repaired.scaleAfterMin}-${repaired.scaleAfterMax}px; stabilized hover-jump frames at ${repaired.hoverJumpMinHeight}-${repaired.hoverJumpMaxHeight}px on y=[${repaired.hoverJumpCentersY.map((value) => value.toFixed(1)).join(",")}]; deleted ${repaired.scarfPanelPixelsDeleted} running-left scarf-panel pixels before restoring ${repaired.scarfBodyBackingPixels} navy body-backing pixels (${repaired.scarfFallbackBodyBackingPixels} canonical navy fallbacks, ${repaired.scarfTransparentDeletedPixels} remain transparent, white replacements ${repaired.scarfWhiteReplacementPixels}; hidden max ${repaired.scarfMaxHiddenPanelPixels}, visible running-right min ${repaired.scarfMinVisiblePanelPixels}) and recolored ${repaired.blueHaloPixelsRecolored} blue-halo pixels; ${repaired.blueHaloPixelsOutsideSafeEdge} interior navy pixels were preserved.`,
     );
   } else {
     if (!base) throw new Error(`A source image is required for fallback atlas generation: ${sourcePath}`);
