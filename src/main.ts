@@ -211,27 +211,38 @@ const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Codex Pet root element is missing.");
 
 app.innerHTML = `
-  <section class="pet-shell" aria-live="polite">
-    <div class="speech-bubble" role="status">陪着你</div>
+  <section
+    class="pet-shell"
+    tabindex="0"
+    aria-label="Codex 小企鹅，可拖动移动，按 Enter 挥手，按菜单键打开操作菜单"
+    aria-describedby="pet-status"
+    aria-keyshortcuts="Enter Space Shift+F10"
+    aria-haspopup="menu"
+    aria-controls="pet-menu"
+    aria-expanded="false"
+  >
+    <div class="speech-bubble" id="pet-status" role="status" aria-live="polite" aria-atomic="true">
+      <span class="bubble-status-dot" aria-hidden="true"></span>
+      <span class="bubble-label">陪着你</span>
+    </div>
     <div class="sprite-stage">
       <div class="sprite" role="img" aria-label="Codex 小企鹅"></div>
       <img class="fallback-pet" src="./placeholder.svg" alt="Codex Pet 占位角色" />
     </div>
-    <div class="state-dot" aria-hidden="true"></div>
   </section>
-  <nav class="context-menu" aria-label="宠物菜单" hidden>
-    <button type="button" data-command="pause">暂停动画</button>
-    <button type="button" data-command="demo">演示下一个动作</button>
-    <button type="button" data-command="autostart">开机自动启动</button>
-    <div class="menu-separator"></div>
-    <button type="button" data-command="hide">暂时隐藏</button>
-    <button type="button" data-command="quit" class="danger">退出</button>
-  </nav>
+  <div class="context-menu" id="pet-menu" role="menu" aria-label="宠物菜单" hidden>
+    <button type="button" role="menuitemcheckbox" aria-checked="false" data-command="pause">暂停动画</button>
+    <button type="button" role="menuitem" data-command="demo">换个动作</button>
+    <button type="button" role="menuitemcheckbox" aria-checked="false" data-command="autostart">开机自动启动</button>
+    <div class="menu-separator" role="separator"></div>
+    <button type="button" role="menuitem" data-command="hide">暂时隐藏</button>
+    <button type="button" role="menuitem" data-command="quit" class="danger">退出 Codex Pet</button>
+  </div>
 `;
 
 const sprite = app.querySelector<HTMLElement>(".sprite")!;
 const fallbackPet = app.querySelector<HTMLImageElement>(".fallback-pet")!;
-const bubble = app.querySelector<HTMLElement>(".speech-bubble")!;
+const bubbleLabel = app.querySelector<HTMLElement>(".bubble-label")!;
 const menu = app.querySelector<HTMLElement>(".context-menu")!;
 const pauseButton = app.querySelector<HTMLButtonElement>("[data-command='pause']")!;
 const autostartButton = app.querySelector<HTMLButtonElement>("[data-command='autostart']")!;
@@ -259,6 +270,7 @@ let remoteExpiresAt = 0;
 let lastRemoteStamp = 0;
 let queuedWindowPosition: WindowPosition | null = null;
 let movingWindow = false;
+let noticeTimer = 0;
 
 function frameDuration(definition: AnimationDefinition, index: number): number {
   return definition.durations[index % definition.durations.length];
@@ -292,9 +304,19 @@ function setAction(next: PetAction, restart = false): void {
     frame = definition.holdFrame ?? definition.frames - 1;
     failedHolding = true;
   }
-  bubble.textContent = definition.label;
+  if (shell.dataset.notice !== "true") bubbleLabel.textContent = definition.label;
   shell.dataset.state = action;
   renderFrame();
+}
+
+function showNotice(message: string): void {
+  window.clearTimeout(noticeTimer);
+  shell.dataset.notice = "true";
+  bubbleLabel.textContent = message;
+  noticeTimer = window.setTimeout(() => {
+    delete shell.dataset.notice;
+    bubbleLabel.textContent = animations[action].label;
+  }, 2400);
 }
 
 function resumeDesiredAction(): void {
@@ -412,7 +434,9 @@ async function detectAtlas(): Promise<void> {
     if (hasPoseAtlas) configureDesktopPoseAnimations();
     renderFrame();
   } else {
-    bubble.textContent = "等待本地宠物素材";
+    window.clearTimeout(noticeTimer);
+    shell.dataset.notice = "true";
+    bubbleLabel.textContent = "等待本地宠物素材";
   }
 }
 
@@ -475,33 +499,59 @@ async function pollPetState(): Promise<void> {
   }
 }
 
-function closeMenu(): void {
+function closeMenu(restoreFocus = false): void {
+  if (menu.hidden) return;
+  const hadMenuFocus = menu.contains(document.activeElement);
   menu.hidden = true;
+  shell.setAttribute("aria-expanded", "false");
+  menu.style.removeProperty("visibility");
+  if (restoreFocus || hadMenuFocus) shell.focus({ preventScroll: true });
 }
 
 function openMenu(x: number, y: number): void {
-  const menuWidth = 184;
-  const menuHeight = 220;
-  menu.style.left = `${Math.min(x, window.innerWidth - menuWidth - 8)}px`;
-  menu.style.top = `${Math.min(y, window.innerHeight - menuHeight - 8)}px`;
+  const edge = 8;
   menu.hidden = false;
+  shell.setAttribute("aria-expanded", "true");
+  menu.style.visibility = "hidden";
+  menu.style.left = "0";
+  menu.style.top = "0";
+
+  const bounds = menu.getBoundingClientRect();
+  const maxLeft = Math.max(edge, window.innerWidth - bounds.width - edge);
+  const maxTop = Math.max(edge, window.innerHeight - bounds.height - edge);
+  menu.style.left = `${Math.max(edge, Math.min(x, maxLeft))}px`;
+  menu.style.top = `${Math.max(edge, Math.min(y, maxTop))}px`;
+  menu.style.removeProperty("visibility");
+
+  menu.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
 }
 
 async function refreshAutostartLabel(): Promise<void> {
   try {
     const enabled = await isAutostartEnabled();
-    autostartButton.textContent = enabled ? "关闭开机启动" : "开启开机启动";
+    autostartButton.textContent = "开机自动启动";
+    autostartButton.disabled = false;
+    autostartButton.setAttribute("aria-checked", String(enabled));
   } catch {
-    autostartButton.textContent = "开机启动（桌面版）";
+    autostartButton.textContent = "开机启动（仅桌面版）";
+    autostartButton.disabled = true;
+    autostartButton.setAttribute("aria-checked", "false");
   }
+}
+
+function syncMotionControl(): void {
+  pauseButton.disabled = reducedMotion;
+  pauseButton.textContent = reducedMotion ? "系统已减少动画" : paused ? "继续动画" : "暂停动画";
+  pauseButton.setAttribute("aria-checked", String(paused || reducedMotion));
+  shell.dataset.motion = paused || reducedMotion ? "reduced" : "full";
 }
 
 async function runCommand(command: string): Promise<void> {
   switch (command) {
     case "pause":
       paused = !paused;
-      pauseButton.textContent = paused ? "继续动画" : "暂停动画";
-      shell.dataset.motion = paused || reducedMotion ? "reduced" : "full";
+      syncMotionControl();
+      showNotice(paused ? "动画已暂停" : "动画已继续");
       break;
     case "demo": {
       const nextIndex = (demoOrder.indexOf(action) + 1) % demoOrder.length;
@@ -510,10 +560,12 @@ async function runCommand(command: string): Promise<void> {
     }
     case "autostart":
       try {
-        await setAutostart(!(await isAutostartEnabled()));
+        const enabled = !(await isAutostartEnabled());
+        await setAutostart(enabled);
         await refreshAutostartLabel();
+        showNotice(enabled ? "已开启开机启动" : "已关闭开机启动");
       } catch {
-        bubble.textContent = "请在桌面版中设置自启";
+        showNotice("无法更改开机启动设置");
       }
       break;
     case "hide":
@@ -523,7 +575,7 @@ async function runCommand(command: string): Promise<void> {
       await quitApp().catch(() => undefined);
       break;
   }
-  closeMenu();
+  closeMenu(true);
 }
 
 async function flushWindowMoves(): Promise<void> {
@@ -626,11 +678,27 @@ shell.addEventListener("pointercancel", (event) => finishDrag(event.pointerId));
 window.addEventListener("blur", () => finishDrag());
 shell.addEventListener("dblclick", () => startLocalAction("waving"));
 
-window.addEventListener("contextmenu", (event) => {
+shell.addEventListener("keydown", (event) => {
+  if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    event.preventDefault();
+    const stageBounds = shell.querySelector<HTMLElement>(".sprite-stage")!.getBoundingClientRect();
+    openMenu(stageBounds.left + stageBounds.width / 2, stageBounds.top + 48);
+    void refreshAutostartLabel();
+    return;
+  }
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    startLocalAction("waving");
+  }
+});
+
+shell.addEventListener("contextmenu", (event) => {
   event.preventDefault();
   openMenu(event.clientX, event.clientY);
   void refreshAutostartLabel();
 });
+
+menu.addEventListener("contextmenu", (event) => event.preventDefault());
 
 window.addEventListener("pointerdown", (event) => {
   if (!menu.contains(event.target as Node) && event.button !== 2) closeMenu();
@@ -641,9 +709,37 @@ menu.addEventListener("click", (event) => {
   if (button) void runCommand(button.dataset.command ?? "");
 });
 
+menu.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeMenu(true);
+    return;
+  }
+
+  const items = Array.from(menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+  if (!items.length) return;
+  const currentIndex = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement));
+  let nextIndex: number | undefined;
+  if (event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)) {
+    nextIndex = (currentIndex + 1) % items.length;
+  } else if (event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)) {
+    nextIndex = (currentIndex - 1 + items.length) % items.length;
+  } else if (event.key === "Home") {
+    nextIndex = 0;
+  } else if (event.key === "End") {
+    nextIndex = items.length - 1;
+  }
+  if (nextIndex !== undefined) {
+    event.preventDefault();
+    items[nextIndex].focus({ preventScroll: true });
+  }
+});
+
+window.addEventListener("resize", () => closeMenu());
+
 reducedMotionQuery.addEventListener("change", (event) => {
   reducedMotion = event.matches;
-  shell.dataset.motion = paused || reducedMotion ? "reduced" : "full";
+  syncMotionControl();
   if (action === "failed" && remoteState === "failed" && localActionKind === null) {
     setAction("failed", true);
   } else {
@@ -652,7 +748,7 @@ reducedMotionQuery.addEventListener("change", (event) => {
   }
 });
 
-shell.dataset.motion = reducedMotion ? "reduced" : "full";
+syncMotionControl();
 void detectAtlas();
 void pollPetState();
 requestAnimationFrame(tick);

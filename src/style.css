@@ -3,6 +3,14 @@
   color: #f7fbff;
   font-synthesis: none;
   text-rendering: geometricPrecision;
+  --ink: #12243a;
+  --surface: rgb(255 255 255 / 96%);
+  --menu-surface: rgb(18 30 48 / 96%);
+  --menu-border: rgb(255 255 255 / 22%);
+  --status-idle: #39b86a;
+  --status-active: #4d9fff;
+  --status-waiting: #f2b933;
+  --status-failed: #f06262;
 }
 
 * {
@@ -28,10 +36,11 @@ button {
 .pet-shell {
   position: absolute;
   inset: 0;
-  cursor: grab;
   display: grid;
   place-items: end center;
   padding-bottom: 12px;
+  outline: 0;
+  cursor: grab;
   touch-action: none;
 }
 
@@ -42,19 +51,25 @@ button {
 
 .sprite-stage {
   position: relative;
+  display: grid;
   width: 230px;
   height: 248px;
-  display: grid;
   place-items: center;
+  border-radius: 42px;
   filter: drop-shadow(0 8px 6px rgb(0 0 0 / 24%));
+}
+
+.pet-shell:focus-visible .sprite-stage {
+  outline: 2px solid rgb(106 174 255 / 92%);
+  outline-offset: -4px;
 }
 
 .sprite {
   width: 192px;
   height: 208px;
+  background-repeat: no-repeat;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  background-repeat: no-repeat;
   transform: scale(1.12);
   transform-origin: center bottom;
 }
@@ -69,68 +84,103 @@ button {
 .speech-bubble {
   position: absolute;
   z-index: 3;
-  top: 6px;
+  top: 4px;
   left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
   max-width: 220px;
-  transform: translateX(-50%) translateY(-4px);
-  padding: 7px 12px;
-  border: 1px solid rgb(255 255 255 / 72%);
-  border-radius: 14px;
-  color: #12243a;
-  background: rgb(255 255 255 / 92%);
-  box-shadow: 0 5px 14px rgb(4 17 38 / 18%);
+  padding: 6px 11px;
+  border: 1px solid rgb(18 36 58 / 14%);
+  border-radius: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 6px 16px rgb(4 17 38 / 22%);
   font-size: 12px;
   font-weight: 700;
+  line-height: 1.35;
   white-space: nowrap;
   opacity: 0;
-  transition: opacity 160ms ease, transform 160ms ease;
   pointer-events: none;
+  transform: translateX(-50%) translateY(-4px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.speech-bubble::after {
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  border-right: 1px solid rgb(18 36 58 / 10%);
+  border-bottom: 1px solid rgb(18 36 58 / 10%);
+  background: var(--surface);
+  content: "";
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.bubble-status-dot {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-idle);
+  box-shadow: 0 0 0 2px rgb(57 184 106 / 16%);
+}
+
+.bubble-label {
+  position: relative;
+  z-index: 1;
 }
 
 .pet-shell:hover .speech-bubble,
+.pet-shell:focus-visible .speech-bubble,
+.pet-shell[data-notice="true"] .speech-bubble,
 .pet-shell[data-state="waiting"] .speech-bubble,
 .pet-shell[data-state="failed"] .speech-bubble,
-.pet-shell[data-state="jumping"] .speech-bubble {
+.pet-shell[data-state="jumping"] .speech-bubble,
+.pet-shell[data-state="waving"] .speech-bubble,
+.pet-shell[data-state="looking"] .speech-bubble,
+.pet-shell[data-state="mischief"] .speech-bubble,
+.pet-shell[data-state="rolling"] .speech-bubble,
+.pet-shell[data-state="lying"] .speech-bubble,
+.pet-shell[data-state="running"] .speech-bubble,
+.pet-shell[data-state="review"] .speech-bubble {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
 
-.state-dot {
-  position: absolute;
-  right: 18px;
-  bottom: 18px;
-  width: 9px;
-  height: 9px;
-  border: 2px solid rgb(255 255 255 / 85%);
-  border-radius: 50%;
-  background: #70d68a;
-  box-shadow: 0 1px 5px rgb(0 0 0 / 24%);
+.pet-shell[data-state="running"] .bubble-status-dot,
+.pet-shell[data-state="review"] .bubble-status-dot {
+  background: var(--status-active);
 }
 
-.pet-shell[data-state="running"] .state-dot,
-.pet-shell[data-state="review"] .state-dot {
-  background: #4da3ff;
+.pet-shell[data-state="waiting"] .bubble-status-dot {
+  background: var(--status-waiting);
 }
 
-.pet-shell[data-state="waiting"] .state-dot {
-  background: #ffcc4d;
-}
-
-.pet-shell[data-state="failed"] .state-dot {
-  background: #ff6b6b;
+.pet-shell[data-state="failed"] .bubble-status-dot {
+  background: var(--status-failed);
 }
 
 .context-menu {
-  position: absolute;
+  position: fixed;
   z-index: 20;
-  width: 184px;
-  padding: 7px;
-  border: 1px solid rgb(255 255 255 / 32%);
-  border-radius: 12px;
+  width: min(188px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--menu-border);
+  border-radius: 13px;
   color: #f5f8ff;
-  background: rgb(18 28 45 / 94%);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 34%);
-  backdrop-filter: blur(12px);
+  background: var(--menu-surface);
+  box-shadow: 0 14px 32px rgb(0 0 0 / 38%), inset 0 1px 0 rgb(255 255 255 / 6%);
+  font-size: 13px;
+  line-height: 1.3;
+  backdrop-filter: blur(16px) saturate(1.12);
 }
 
 .context-menu[hidden] {
@@ -139,7 +189,7 @@ button {
 
 .context-menu button {
   width: 100%;
-  min-height: 33px;
+  min-height: 34px;
   padding: 6px 10px;
   border: 0;
   border-radius: 7px;
@@ -147,13 +197,51 @@ button {
   background: transparent;
   text-align: left;
   cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
 }
 
-.context-menu button:hover {
-  background: rgb(93 156 236 / 24%);
+.context-menu button[role="menuitemcheckbox"] {
+  position: relative;
+  padding-left: 30px;
 }
 
-.context-menu button.danger:hover {
+.context-menu button[role="menuitemcheckbox"]::before {
+  position: absolute;
+  left: 10px;
+  color: #8fc5ff;
+  content: "";
+  font-size: 13px;
+  font-weight: 800;
+  opacity: 0;
+}
+
+.context-menu button[role="menuitemcheckbox"][aria-checked="true"]::before {
+  content: "✓";
+  opacity: 1;
+}
+
+.context-menu button:hover,
+.context-menu button:focus-visible {
+  outline: 0;
+  background: rgb(93 156 236 / 22%);
+}
+
+.context-menu button:disabled {
+  color: rgb(245 248 255 / 46%);
+  cursor: default;
+}
+
+.context-menu button:disabled:hover {
+  background: transparent;
+}
+
+.context-menu button.danger {
+  color: #ffbcbc;
+}
+
+.context-menu button.danger:hover,
+.context-menu button.danger:focus-visible {
+  color: #ffe0e0;
   background: rgb(255 87 87 / 24%);
 }
 

@@ -46,23 +46,25 @@ $xaml = @'
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
         WindowStartupLocation="Manual">
-  <Grid Name="Root" Background="Transparent">
+  <Grid Name="Root" Background="Transparent" Focusable="True"
+        AutomationProperties.Name="Codex 小企鹅，可拖动移动，按 Enter 挥手，按菜单键打开操作菜单">
     <Border Name="Bubble" HorizontalAlignment="Center" VerticalAlignment="Top"
-            Margin="0,6,0,0" Padding="12,7" CornerRadius="14"
-            BorderBrush="#B8FFFFFF" BorderThickness="1" Background="#F2FFFFFF"
+            Margin="0,4,0,0" Padding="11,6" CornerRadius="12"
+            BorderBrush="#2412243A" BorderThickness="1" Background="#F7FFFFFF"
             Visibility="Collapsed">
       <Border.Effect>
         <DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity="0.24"/>
       </Border.Effect>
-      <TextBlock Name="BubbleText" Text="陪着你" Foreground="#12243A"
-                 FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="Bold"/>
+      <StackPanel Orientation="Horizontal">
+        <Ellipse Name="StateDot" Width="7" Height="7" Margin="0,0,7,0"
+                 VerticalAlignment="Center" Fill="#39B86A"/>
+        <TextBlock Name="BubbleText" Text="陪着你" Foreground="#12243A"
+                   FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="Bold"/>
+      </StackPanel>
     </Border>
     <Image Name="PetImage" Width="215" Height="233" Margin="0,42,0,7"
            HorizontalAlignment="Center" VerticalAlignment="Bottom"
            Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
-    <Ellipse Name="StateDot" Width="10" Height="10" Margin="0,0,19,18"
-             HorizontalAlignment="Right" VerticalAlignment="Bottom"
-             Stroke="#E8FFFFFF" StrokeThickness="2" Fill="#70D68A"/>
   </Grid>
 </Window>
 '@
@@ -255,7 +257,7 @@ function Set-PetAction([string]$Action, [bool]$Restart = $false) {
         'failed'  { $stateDot.Fill = [Windows.Media.Brushes]::Tomato }
         default   { $stateDot.Fill = [Windows.Media.Brushes]::MediumSeaGreen }
     }
-    if ($script:action -in @('waving', 'jumping', 'failed', 'waiting', 'looking', 'mischief', 'rolling', 'lying')) {
+    if ($script:action -in @('waving', 'jumping', 'failed', 'waiting', 'running', 'review', 'looking', 'mischief', 'rolling', 'lying')) {
         $bubble.Visibility = [Windows.Visibility]::Visible
     } elseif (-not $root.IsMouseOver) {
         $bubble.Visibility = [Windows.Visibility]::Collapsed
@@ -546,7 +548,7 @@ $pauseItem = New-Object Windows.Controls.MenuItem
 $pauseItem.Header = if ($script:reduceMotion) { '系统已减少动画' } else { '暂停动画' }
 $pauseItem.IsEnabled = -not $script:reduceMotion
 $demoItem = New-Object Windows.Controls.MenuItem
-$demoItem.Header = '演示下一个动作'
+$demoItem.Header = '换个动作'
 $autoRoamItem = New-Object Windows.Controls.MenuItem
 $autoRoamItem.Header = '自动闲逛'
 $autoRoamItem.IsCheckable = $true
@@ -560,7 +562,7 @@ $autostartItem.IsChecked = Test-Path -LiteralPath $startupPath
 $hideItem = New-Object Windows.Controls.MenuItem
 $hideItem.Header = '暂时隐藏'
 $exitItem = New-Object Windows.Controls.MenuItem
-$exitItem.Header = '退出'
+$exitItem.Header = '退出 Codex Pet'
 
 $pauseItem.Add_Click({
     $script:paused = -not $script:paused
@@ -625,6 +627,24 @@ $exitItem.Add_Click({ $script:allowExit = $true; $window.Close() })
 [void]$contextMenu.Items.Add($hideItem)
 [void]$contextMenu.Items.Add($exitItem)
 $root.ContextMenu = $contextMenu
+
+$root.Add_KeyDown({
+    param($sender, $eventArgs)
+    $openMenu = $eventArgs.Key -eq [Windows.Input.Key]::Apps -or
+        ($eventArgs.Key -eq [Windows.Input.Key]::F10 -and
+        (([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift) -ne 0))
+    if ($openMenu) {
+        $contextMenu.PlacementTarget = $root
+        $contextMenu.IsOpen = $true
+        $eventArgs.Handled = $true
+        return
+    }
+    if ($eventArgs.Key -in @([Windows.Input.Key]::Enter, [Windows.Input.Key]::Space)) {
+        $script:directionalActionEndsAt = [DateTime]::MinValue
+        Start-LocalAction -Action 'waving' -Kind 'manual'
+        $eventArgs.Handled = $true
+    }
+})
 
 $root.Add_MouseMove({
     param($sender, $eventArgs)
@@ -691,6 +711,7 @@ $finishDrag = {
 
 $root.Add_MouseLeftButtonDown({
     param($sender, $eventArgs)
+    [void]$root.Focus()
     if ($eventArgs.ClickCount -ge 2) {
         $script:directionalActionEndsAt = [DateTime]::MinValue
         Start-LocalAction -Action 'waving' -Kind 'manual'
