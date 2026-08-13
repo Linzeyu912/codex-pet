@@ -1,5 +1,20 @@
 # Codex Pet
 
+<p align="center">
+  <img src="public/aurora-penguin.png" width="300" alt="Aurora 企鹅正面待机，青色围巾的下垂部分位于正面左侧">
+  <img src="public/aurora-penguin-wave.png" width="300" alt="Aurora 企鹅抬起鳍挥手">
+</p>
+
+<p align="center">
+  <strong>让 Codex 的工作状态，变成桌面上看得见的陪伴。</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Linzeyu912/codex-pet/releases/latest"><img src="https://img.shields.io/github/v/release/Linzeyu912/codex-pet?display_name=tag&sort=semver" alt="GitHub 最新版本"></a>
+  <a href="https://github.com/Linzeyu912/codex-pet/actions/workflows/windows-ci.yml"><img src="https://github.com/Linzeyu912/codex-pet/actions/workflows/windows-ci.yml/badge.svg?branch=main" alt="Windows CI 状态"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="MIT 许可证"></a>
+</p>
+
 一只同时住在 Codex 和 Windows 桌面的企鹅宠物。Codex Pet 把工作、等待、完成、检查和失败等状态变成连续动画；桌面版还能左右散步、拖动、回头、背身调皮、侧躺和翻滚。
 
 当前版本：`0.3.1`。
@@ -12,6 +27,17 @@
 - **Windows 桌面宠物**：以 Tauri 2 作为唯一公开桌面运行时，透明置顶、可拖动，支持单实例、托盘、位置记忆、开机启动、自动巡游、状态桥接和动作菜单。
 
 Codex 官方说明：[Pets](https://learn.chatgpt.com/docs/pets)。仓库中的详细兼容契约见 [docs/codex-pet-contract.md](docs/codex-pet-contract.md)。
+
+## 认识 Aurora
+
+Aurora 是项目原创、可公开分发的像素企鹅。青色围巾不是左右镜像设计：下垂部分只在正面左侧，转向和跑动时会遵循身体遮挡关系，只在对应侧面可见。角色源图、公开图集和桌面安装包都经过透明边缘与隐藏 RGB 检查，避免在深色桌面上出现蓝色边框。
+
+| 陪伴方式 | 表现 |
+| --- | --- |
+| Codex 宠物 | 根据 Pets V2 状态播放工作、等待、完成、检查与失败动画 |
+| Windows 桌面伙伴 | 自动散步、拖动、挥手、张望、跳跃、侧躺和翻滚 |
+| Codex 通知 | 一轮任务完成后立即显示“完成啦”并跳跃 |
+| 安静运行 | 空闲时降低刷新与轮询频率，减少不必要的 CPU 唤醒 |
 
 ## 在 D 盘运行
 

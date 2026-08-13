@@ -6,6 +6,11 @@ All notable project changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+
+- Added an illustrated Aurora introduction, release/build/license badges, and
+  concise visual feature summary to the GitHub README.
+
 ## [0.3.1] - 2026-08-13
 
 ### Added
