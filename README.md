@@ -28,7 +28,7 @@ pnpm dev
 
 环境要求：Windows 10/11、Node.js 20.19+ 或 22.12+、pnpm 11+；推荐 Node.js 24。也可双击 `windows\Start-CodexPet.cmd` 启动。启动诊断日志保存在 `%LOCALAPPDATA%\Codex Pet\logs`。
 
-干净克隆没有本地角色素材时，会自动生成并使用可公开发布的几何占位企鹅，项目仍可完整运行。
+干净克隆会直接使用项目原创、可公开分发的 Aurora 企鹅；不需要额外角色素材即可获得完整图集和动作。
 
 ## 桌面操作
 
@@ -40,7 +40,7 @@ pnpm dev
 
 ## 本地经典企鹅素材
 
-公开仓库只包含程序、生成与校验工具、应用图标和无权利负担的占位图，不分发经典 QQ 企鹅素材。
+公开仓库包含程序、生成与校验工具、应用图标和原创 Aurora 企鹅，不分发经典 QQ 企鹅素材。
 
 有权进行个人本地实验的开发者，可自行准备透明 PNG：
 
@@ -93,7 +93,7 @@ pnpm assets:uninstall
 
 可用 `--no-restore-backup` 只移除当前安装，或用 `--pet-id <id>` 明确目标；检测到未知或已修改文件时仍需显式 `--force`。测试其他 Codex 配置可向安装和卸载命令传入 `--codex-home <path>`。
 
-有本地经典素材时，默认宠物 ID 为 `custom:qq-penguin`；没有时安装公开占位宠物 `custom:codex-penguin-placeholder`。安装后进入 Codex 的 `Settings → Pets`，刷新并选择对应宠物。
+有本地经典素材时，默认宠物 ID 为 `custom:qq-penguin`；没有时安装公开原创宠物 `custom:codex-aurora-penguin`。安装后进入 Codex 的 `Settings → Pets`，刷新并选择对应宠物。
 
 ## Codex Pets V2 图集
 
@@ -156,7 +156,7 @@ Codex 的外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-adv
 pnpm verify
 ```
 
-它检查版本一致性、脚本语法、TypeScript、Web 构建、公开占位图集、连续性、PowerShell，并在本机可用时调用 Codex 官方图集校验器。发布前运行：
+它检查版本一致性、脚本语法、TypeScript、Web 构建、公开原创图集、无透明色边、连续性、PowerShell，并在本机可用时调用 Codex 官方图集校验器。发布前运行：
 
 ```powershell
 pnpm release:gate
@@ -164,10 +164,10 @@ pnpm release:gate
 
 `pnpm build` 是同一发布门禁的别名。发布门禁还会逐动作执行 WPF smoke、清理旧版或未验证的生成物、创建便携包、验证清单与 SHA-256，并检查 Git 中没有本地经典素材。CI 使用 `pnpm verify:ci`，还要求 Rust/Tauri 编译检查与单元测试通过。本地经典图集另须通过零警告的 V2 权威 QA 汇总、低透明度青色色边清零和完整 14 对方向盲测；盲测图由待测图集确定性生成，三位隔离评审必须逐项一致且置信度不低于 `medium`，图集、盲测图和原始 verdict 均以 SHA-256 绑定，旧汇总不能复用。生成目录和固定输出还会拒绝符号链接与 Windows junction，避免构建写出项目边界。
 
-公共构建始终强制使用占位企鹅，即使本机存在经典素材：
+公共构建始终强制使用原创 Aurora 企鹅，即使本机存在经典素材：
 
 ```text
-release\CodexPet-0.2.0-public-placeholder\
+release\CodexPet-0.2.0-public-aurora\
 release\Codex-Pet-0.2.0-portable.zip
 release\Codex-Pet-0.2.0-portable.zip.sha256
 release\Codex-Pet-0.2.0-portable.build-manifest.json
@@ -187,10 +187,10 @@ src-tauri/              Tauri 2 原生桌面壳
 windows/                PowerShell/WPF 桌面壳与便携构建
 scripts/                图集、QA、安装、发布和状态桥接
 docs/                   角色与接口说明
-public/placeholder.svg  MIT 许可的公开占位角色
+public/aurora-penguin*.png  MIT 许可的原创公共角色源图
 .local-assets/          本地第三方素材与衍生文件（Git 忽略）
 ```
 
 ## 许可证与责任边界
 
-源代码、文档、公开占位角色和项目自制应用图标采用 [MIT License](LICENSE)。经典 QQ 企鹅参考、像素重绘、衍生图集，以及任何标记为 `local-classic` 的包均不在 MIT 授权范围内，也不应上传到 GitHub Releases、软件商店或其他公开渠道。贡献和安全说明分别见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)。
+源代码、文档、原创 Aurora 企鹅和项目自制应用图标采用 [MIT License](LICENSE)。经典 QQ 企鹅参考、像素重绘、衍生图集，以及任何标记为 `local-classic` 的包均不在 MIT 授权范围内，也不应上传到 GitHub Releases、软件商店或其他公开渠道。贡献和安全说明分别见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)。

@@ -8,7 +8,7 @@ const release = argumentsSet.has("--release");
 const ci = argumentsSet.has("--ci") || process.env.CI === "true";
 const withTauri = argumentsSet.has("--with-tauri") || ci;
 const powershell = process.platform === "win32" ? "powershell.exe" : "pwsh";
-const safeEnvironment = { ...process.env, CODEX_PET_FORCE_PLACEHOLDER: "1" };
+const safeEnvironment = { ...process.env, CODEX_PET_FORCE_PUBLIC_MASCOT: "1" };
 
 function run(label, command, args, options = {}) {
   console.log(`\n==> ${label}`);
@@ -55,7 +55,7 @@ run("State bridge self-tests", process.execPath, ["scripts/test-state-bridge.mjs
 run("Install safety self-tests", process.execPath, ["scripts/test-install-safety.mjs"]);
 run("TypeScript check", process.execPath, ["node_modules/typescript/bin/tsc", "--noEmit"]);
 run("Web production build", process.execPath, ["node_modules/vite/bin/vite.js", "build"]);
-run("Rights-safe placeholder atlas", process.execPath, ["scripts/prepare-local-assets.mjs"]);
+run("Redistributable original mascot atlas", process.execPath, ["scripts/prepare-local-assets.mjs"]);
 run("Animation continuity", process.execPath, ["scripts/check-animation-continuity.mjs"]);
 
 if (process.platform === "win32") {

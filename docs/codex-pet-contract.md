@@ -137,15 +137,17 @@ Codex 官方外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-
 
 ## QA 与公开发布契约
 
-`pnpm verify` 统一检查版本、Node 脚本、TypeScript、Web 构建、公开占位图集、动画连续性和 PowerShell；本机存在 Codex 官方校验器时也会调用它。`pnpm release:gate` 额外执行所有桌面动作 smoke、生成公共便携包并检查发布政策；CI 的 `pnpm verify:ci` 还必须通过 Rust/Tauri 编译与单元测试。
+`pnpm verify` 统一检查版本、Node 脚本、TypeScript、Web 构建、公开原创 Aurora 图集、动画连续性和 PowerShell；本机存在 Codex 官方校验器时也会调用它。`pnpm release:gate` 额外执行所有桌面动作 smoke、生成公共便携包并检查发布政策；CI 的 `pnpm verify:ci` 还必须通过 Rust/Tauri 编译与单元测试。
+
+公共 Aurora 图集使用严格几何配置：站立动作可见高度比例不超过 `1.015`，当前生成目标为 `170px`；悬停跳跃五帧必须是 idle 的精确垂直平移；方向循环必须通过眼内高光的顺时针语义检查；公开 PNG 不允许半透明边缘或透明像素残留 RGB，从源头避免底色光晕。
 
 本地经典图集只有在以下权威 QA 工件全部通过、与同一 atlas SHA-256 绑定且时间未过期时，才可被构建器选用：官方 V2 校验、逐行动画连续性、完整覆盖 14 个水平/垂直对照的方向盲测、方向语义、方向循环、最终帧审阅，以及青色色键边缘审计。边缘审计使用 `#00FFFF`、色距 `160`、透明度下限 `1`，要求连低透明度的残留底色也为零。盲测图必须由待测图集确定性生成；方向盲测采用三位互相隔离、不可见答案的评审，14 对共 28 个观察必须全体一致、没有 `ambiguous` 且置信度至少为 `medium`。图集、盲测图与三份原始 verdict 均绑定 SHA-256，汇总时和构建时都会重新解析原始投票。权威汇总使用 `codex-pet-authoritative-run/v2`，目标是 `ok: true`、零错误、零警告；旧汇总会被拒绝。所有固定生成目录在写入前拒绝符号链接、junction 和 realpath 逃逸，并以同级临时文件原子替换输出。
 
-公共构建始终设置占位资源，并拒绝以下内容：
+公共构建始终设置原创 Aurora 资源，并拒绝以下内容：
 
 - Git 跟踪的 `.local-assets/`、`public/local/`、`release/` 文件
-- 未批准的栅格角色素材
-- `local-classic` 包或非 `codex-penguin-placeholder` 的公共 manifest
+- 除 `public/aurora-penguin.png`、`public/aurora-penguin-wave.png` 和应用图标外的未批准栅格素材
+- `local-classic` 包或非 `codex-aurora-penguin` 的公共 manifest
 - 版本、构建 manifest 或 SHA-256 sidecar 不一致
 
 显式的 `pnpm build:portable:local-classic` 仅供个人本地实验，在 CI 中被拒绝，产物带有不可再分发警告。

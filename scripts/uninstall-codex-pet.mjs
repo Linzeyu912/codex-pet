@@ -30,7 +30,9 @@ if (options.help) {
 
 const codexHome = options.codexHome ?? path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"));
 const petsRoot = path.join(codexHome, "pets");
-const knownPetIds = options.petId ? [options.petId] : ["qq-penguin", "codex-penguin-placeholder"];
+const knownPetIds = options.petId
+  ? [options.petId]
+  : ["qq-penguin", "codex-aurora-penguin", "codex-penguin-placeholder"];
 const installed = [];
 for (const petId of knownPetIds) {
   const destination = assertChildPath(petsRoot, path.join(petsRoot, petId), "Pet destination");

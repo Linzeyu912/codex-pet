@@ -7,11 +7,12 @@ $coherentAtlas = Join-Path $projectRoot '.local-assets\qq-penguin\coherent-v2-ru
 $coherentValidation = Join-Path $projectRoot '.local-assets\qq-penguin\coherent-v2-run\final\validation-extended.json'
 $hasClassicSource = Test-Path -LiteralPath $classicSource
 $hasValidatedCoherentAtlas = (Test-Path -LiteralPath $coherentAtlas) -and (Test-Path -LiteralPath $coherentValidation)
-$useCoherentAtlas = $env:CODEX_PET_FORCE_PLACEHOLDER -ne '1' -and $hasValidatedCoherentAtlas
-$atlasRoot = if ($env:CODEX_PET_FORCE_PLACEHOLDER -ne '1' -and ($hasClassicSource -or $useCoherentAtlas)) {
+$forcePublicMascot = $env:CODEX_PET_FORCE_PUBLIC_MASCOT -eq '1' -or $env:CODEX_PET_FORCE_PLACEHOLDER -eq '1'
+$useCoherentAtlas = -not $forcePublicMascot -and $hasValidatedCoherentAtlas
+$atlasRoot = if (-not $forcePublicMascot -and ($hasClassicSource -or $useCoherentAtlas)) {
     Join-Path $projectRoot '.local-assets\qq-penguin\codex-pet'
 } else {
-    Join-Path $projectRoot '.local-assets\placeholder\codex-pet'
+    Join-Path $projectRoot '.local-assets\public-mascot\codex-pet'
 }
 $atlasPaths = @(
     (Join-Path $atlasRoot 'spritesheet.webp'),

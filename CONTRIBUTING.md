@@ -17,9 +17,10 @@ version check rejects mismatches.
 ## Asset contributions
 
 Do not commit QQ, Tencent, OpenAI, or other third-party character artwork
-without a clearly documented redistribution license. Local references and all
-generated derivatives must remain inside ignored local directories. Public
-pull requests and releases use the geometric placeholder.
+without a clearly documented redistribution license. Local third-party
+references and their generated derivatives must remain inside ignored local
+directories. Public pull requests and releases use the original Aurora
+Penguin assets documented in `ASSET-LICENSES.md`.
 
 By contributing code or original assets, you confirm that you have the right
 to submit them under the repository's MIT license and the terms recorded in

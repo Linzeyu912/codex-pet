@@ -227,7 +227,7 @@ app.innerHTML = `
     </div>
     <div class="sprite-stage">
       <div class="sprite" role="img" aria-label="Codex 小企鹅"></div>
-      <img class="fallback-pet" src="./placeholder.svg" alt="Codex Pet 占位角色" />
+      <img class="fallback-pet" src="./aurora-penguin.png" alt="Aurora 企鹅桌面伙伴" />
     </div>
   </section>
   <div class="context-menu" id="pet-menu" role="menu" aria-label="宠物菜单" hidden>

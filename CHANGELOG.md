@@ -6,6 +6,19 @@ All notable project changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Original MIT-licensed Aurora Penguin public character sources, including a
+  dedicated connected-flipper waving pose.
+
+### Changed
+
+- Clean clones, Codex installation, CI, and public portable builds now use the
+  complete Aurora mascot instead of the geometric placeholder.
+- The generated public atlas now enforces uniform upright scale, exact
+  translated hover-jump frames, semantic gaze direction, detached-component
+  rejection, and zero partial-alpha or hidden-RGB edge pixels.
+
 ## [0.2.0] - 2026-07-16
 
 ### Added

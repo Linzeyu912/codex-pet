@@ -574,11 +574,11 @@ try {
   const generatedLocalRoot = path.join(
     generatedProject,
     ".local-assets",
-    "placeholder",
+    "public-mascot",
     "codex-pet",
   );
   const generatedPublicRoot = path.join(generatedProject, "public", "local");
-  await fs.mkdir(path.join(generatedProject, ".local-assets", "placeholder"), { recursive: true });
+  await fs.mkdir(path.join(generatedProject, ".local-assets", "public-mascot"), { recursive: true });
   await fs.mkdir(path.join(generatedProject, "public"), { recursive: true });
   const generatedNames = ["spritesheet.webp", "spritesheet.png", "pet.json", "desktop-poses.png"];
   let generatedLocalPlan = await preflightSafeOutputTree({
@@ -658,7 +658,7 @@ try {
   const targetAttackLocalRoot = path.join(
     targetAttackProject,
     ".local-assets",
-    "placeholder",
+    "public-mascot",
     "codex-pet",
   );
   await fs.mkdir(targetAttackPublicRoot, { recursive: true });
@@ -711,7 +711,7 @@ try {
   const outsidePublicSentinel = path.join(outsidePublicTree, "sentinel.txt");
   await fs.writeFile(outsideLocalSentinel, "outside local sentinel\n");
   await fs.writeFile(outsidePublicSentinel, "outside public sentinel\n");
-  const linkedLocalComponent = path.join(junctionLocalParent, "placeholder");
+  const linkedLocalComponent = path.join(junctionLocalParent, "public-mascot");
   const linkedPublicRoot = path.join(junctionPublicParent, "local");
   let generatedJunctionsCreated = false;
   try {

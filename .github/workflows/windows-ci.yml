@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 45
     env:
       CI: "true"
-      CODEX_PET_FORCE_PLACEHOLDER: "1"
+      CODEX_PET_FORCE_PUBLIC_MASCOT: "1"
 
     steps:
       - name: Check out source

@@ -34,7 +34,8 @@ Usage: node scripts/install-codex-pet.mjs [--dry-run] [--force] [--codex-home PA
 }
 
 async function inferDryRunSource() {
-  const usePlaceholder = process.env.CODEX_PET_FORCE_PLACEHOLDER === "1";
+  const usePublicMascot = process.env.CODEX_PET_FORCE_PUBLIC_MASCOT === "1"
+    || process.env.CODEX_PET_FORCE_PLACEHOLDER === "1";
   const coherentValidation = path.join(
     projectRoot,
     ".local-assets",
@@ -44,7 +45,7 @@ async function inferDryRunSource() {
     "validation-extended.json",
   );
   const classicSource = path.join(projectRoot, ".local-assets", "qq-penguin", "pixel-base.png");
-  const classicSelected = !usePlaceholder && ((await pathExists(coherentValidation)) || (await pathExists(classicSource)));
+  const classicSelected = !usePublicMascot && ((await pathExists(coherentValidation)) || (await pathExists(classicSource)));
   return classicSelected
     ? {
         petId: "qq-penguin",
@@ -52,9 +53,9 @@ async function inferDryRunSource() {
         label: "local classic-penguin source",
       }
     : {
-        petId: "codex-penguin-placeholder",
-        outputRoot: path.join(projectRoot, ".local-assets", "placeholder", "codex-pet"),
-        label: "rights-safe public placeholder",
+        petId: "codex-aurora-penguin",
+        outputRoot: path.join(projectRoot, ".local-assets", "public-mascot", "codex-pet"),
+        label: "redistributable original Aurora Penguin mascot",
       };
 }
 

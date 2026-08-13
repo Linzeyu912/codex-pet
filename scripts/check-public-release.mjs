@@ -29,8 +29,8 @@ const violations = [];
 if (manifest.version !== version) violations.push(`manifest version is ${manifest.version}`);
 if (manifest.publicSafe !== true) violations.push("manifest publicSafe is not true");
 if (manifest.localOnly !== false) violations.push("manifest localOnly is not false");
-if (manifest.flavour !== "public-placeholder") violations.push(`unexpected flavour: ${manifest.flavour}`);
-if (manifest.petId !== "codex-penguin-placeholder") violations.push(`unexpected pet id: ${manifest.petId}`);
+if (manifest.flavour !== "public-aurora") violations.push(`unexpected flavour: ${manifest.flavour}`);
+if (manifest.petId !== "codex-aurora-penguin") violations.push(`unexpected pet id: ${manifest.petId}`);
 
 function safeRelativePath(value) {
   if (typeof value !== "string" || !value || value.includes("\0")) return null;
@@ -70,7 +70,7 @@ try {
   }
 
   if (extracted) {
-    const unpackedRoot = path.join(extractionRoot, `CodexPet-${version}-public-placeholder`);
+    const unpackedRoot = path.join(extractionRoot, `CodexPet-${version}-public-aurora`);
     const internalManifestPath = path.join(unpackedRoot, "build-manifest.json");
     const petRoot = path.join(unpackedRoot, "public", "local");
     const petManifestPath = path.join(petRoot, "pet.json");
@@ -168,7 +168,9 @@ for (const file of trackedFiles) {
   if (forbiddenTrackedPrefixes.some((prefix) => file.startsWith(prefix))) {
     violations.push(`local/generated asset is tracked by Git: ${file}`);
   }
-  if (/\.(?:png|webp|gif|jpe?g)$/i.test(file) && !file.startsWith("src-tauri/icons/")) {
+  const approvedPublicRaster = file === "public/aurora-penguin.png"
+    || file === "public/aurora-penguin-wave.png";
+  if (/\.(?:png|webp|gif|jpe?g)$/i.test(file) && !file.startsWith("src-tauri/icons/") && !approvedPublicRaster) {
     violations.push(`unapproved raster asset is tracked by Git: ${file}`);
   }
 }
@@ -181,7 +183,7 @@ if (localClassicArtifacts.length > 0) {
 }
 
 const expectedGeneratedArtifacts = new Set([
-  `CodexPet-${version}-public-placeholder`,
+  `CodexPet-${version}-public-aurora`,
   archiveName,
   path.basename(checksumPath),
   path.basename(manifestPath),

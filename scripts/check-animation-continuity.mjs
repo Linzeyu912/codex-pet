@@ -41,10 +41,10 @@ try {
   if (explicitPoseAtlasPath || error?.code !== "ENOENT") throw error;
   poseAtlasPath = null;
 }
-let placeholderProfile = false;
+let publicMascotProfile = false;
 try {
   const manifest = JSON.parse(await fs.readFile(path.join(path.dirname(inputPath), "pet.json"), "utf8"));
-  placeholderProfile = manifest.id === "codex-penguin-placeholder";
+  publicMascotProfile = manifest.id === "codex-aurora-penguin";
 } catch (error) {
   if (error?.code !== "ENOENT") throw error;
 }
@@ -73,7 +73,9 @@ const rows = [
     minIou: 0.32,
     maxBaseline: 14,
     maxAreaRatio: 1.13,
-    minColorChange: placeholderProfile ? undefined : 0.03,
+    // The public mascot's procedural look loop moves a compact pupil feature;
+    // its semantic landmark audit below is stricter than a whole-frame colour ratio.
+    minColorChange: publicMascotProfile ? undefined : 0.03,
   },
   {
     name: "look-180-337.5",
@@ -83,7 +85,7 @@ const rows = [
     minIou: 0.32,
     maxBaseline: 14,
     maxAreaRatio: 1.13,
-    minColorChange: placeholderProfile ? undefined : 0.03,
+    minColorChange: publicMascotProfile ? undefined : 0.03,
   },
 ];
 const UPRIGHT_ROW_INDICES = new Set([0, 1, 2, 3, 4, 6, 7, 8, 9, 10]);
@@ -308,6 +310,20 @@ const warnings = [];
 const summaries = [];
 const frameRows = [];
 const componentFindings = [];
+const edgeAlphaAudit = { partialAlphaPixels: 0, transparentPixelsWithRgb: 0 };
+for (let offset = 0; offset < data.length; offset += 4) {
+  const alpha = data[offset + 3];
+  if (alpha > 0 && alpha < 255) edgeAlphaAudit.partialAlphaPixels += 1;
+  if (alpha === 0 && (data[offset] !== 0 || data[offset + 1] !== 0 || data[offset + 2] !== 0)) {
+    edgeAlphaAudit.transparentPixelsWithRgb += 1;
+  }
+}
+if (publicMascotProfile && edgeAlphaAudit.partialAlphaPixels > 0) {
+  errors.push(`public mascot: ${edgeAlphaAudit.partialAlphaPixels} partially transparent edge pixels could create a colour halo`);
+}
+if (publicMascotProfile && edgeAlphaAudit.transparentPixelsWithRgb > 0) {
+  errors.push(`public mascot: ${edgeAlphaAudit.transparentPixelsWithRgb} transparent pixels retain hidden RGB fringe data`);
+}
 let desktopPoseInspection = null;
 let desktopPoseScaleConsistency = null;
 if (poseAtlasPath) {
@@ -326,7 +342,7 @@ if (poseAtlasPath) {
       ratio,
       limit: POSE_LONG_SIDE_RATIO_LIMIT,
     };
-    if (!placeholderProfile && ratio > POSE_LONG_SIDE_RATIO_LIMIT) {
+    if (ratio > POSE_LONG_SIDE_RATIO_LIMIT) {
       errors.push(
         `desktop pose character scale ratio ${ratio.toFixed(3)} exceeds ${POSE_LONG_SIDE_RATIO_LIMIT.toFixed(3)} (${minLongSide}-${maxLongSide}px)`,
       );
@@ -405,7 +421,7 @@ for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
       `${definition.name}: adjacent premultiplied RGB change ${minColorChange.toFixed(4)} is below ${definition.minColorChange.toFixed(4)}`,
     );
   }
-  if (!placeholderProfile && UPRIGHT_ROW_INDICES.has(rowIndex) && heightRatio > UPRIGHT_HEIGHT_RATIO_LIMIT) {
+  if (UPRIGHT_ROW_INDICES.has(rowIndex) && heightRatio > UPRIGHT_HEIGHT_RATIO_LIMIT) {
     errors.push(
       `${definition.name}: upright height ratio ${heightRatio.toFixed(3)} exceeds ${UPRIGHT_HEIGHT_RATIO_LIMIT.toFixed(3)} (${minHeight}-${maxHeight}px)`,
     );
@@ -424,7 +440,7 @@ const scaleConsistency = {
   limit: UPRIGHT_HEIGHT_RATIO_LIMIT,
   excludedRows: ["failed"],
 };
-if (!placeholderProfile && uprightHeightRatio > UPRIGHT_HEIGHT_RATIO_LIMIT) {
+if (uprightHeightRatio > UPRIGHT_HEIGHT_RATIO_LIMIT) {
   errors.push(
     `upright character scale ratio ${uprightHeightRatio.toFixed(3)} exceeds ${UPRIGHT_HEIGHT_RATIO_LIMIT.toFixed(3)} (${uprightHeightMin}-${uprightHeightMax}px)`,
   );
@@ -542,10 +558,10 @@ for (let index = 0; index < directionPairs.length; index += 1) {
   }
 }
 
-function placeholderGazeCentroid(frame) {
+function publicMascotGazeCentroid(frame) {
   const boxes = [
-    [70, 92, 58, 88],
-    [102, 124, 58, 88],
+    [65, 98, 48, 92],
+    [96, 132, 48, 92],
   ];
   let count = 0;
   let sumX = 0;
@@ -559,7 +575,7 @@ function placeholderGazeCentroid(frame) {
         const red = frame.premultipliedRgb[offset];
         const green = frame.premultipliedRgb[offset + 1];
         const blue = frame.premultipliedRgb[offset + 2];
-        if (red > 90 || green > 90 || blue > 100) continue;
+        if (!(green > 70 && blue > 100 && blue > red * 1.4)) continue;
         count += 1;
         sumX += x;
         sumY += y;
@@ -569,11 +585,11 @@ function placeholderGazeCentroid(frame) {
   return count === 0 ? null : { x: sumX / count, y: sumY / count, pixels: count };
 }
 
-let placeholderDirectionSemantics = null;
-if (placeholderProfile) {
-  const gazes = directionFrames.map(placeholderGazeCentroid);
+let publicMascotDirectionSemantics = null;
+if (publicMascotProfile) {
+  const gazes = directionFrames.map(publicMascotGazeCentroid);
   if (gazes.some((gaze) => !gaze)) {
-    errors.push("placeholder directions: could not locate the high-contrast pupil feature in every direction frame");
+    errors.push("public mascot directions: could not locate the high-contrast pupil feature in every direction frame");
   } else {
     const rightLeftDelta = gazes[4].x - gazes[12].x;
     const downUpDelta = gazes[8].y - gazes[0].y;
@@ -587,7 +603,7 @@ if (placeholderProfile) {
       const expected = index * 22.5;
       return Math.abs(((normalizedObserved - expected + 540) % 360) - 180);
     });
-    placeholderDirectionSemantics = {
+    publicMascotDirectionSemantics = {
       method: "pupil-feature-centroid",
       gazes,
       rightLeftDelta,
@@ -596,14 +612,14 @@ if (placeholderProfile) {
       maxAngularError: Math.max(...angularErrors),
     };
     if (rightLeftDelta < 4) {
-      errors.push(`placeholder directions: right/left pupil landmark separation ${rightLeftDelta.toFixed(1)}px is below 4px`);
+      errors.push(`public mascot directions: right/left pupil landmark separation ${rightLeftDelta.toFixed(1)}px is below 4px`);
     }
     if (downUpDelta < 3) {
-      errors.push(`placeholder directions: down/up pupil landmark separation ${downUpDelta.toFixed(1)}px is below 3px`);
+      errors.push(`public mascot directions: down/up pupil landmark separation ${downUpDelta.toFixed(1)}px is below 3px`);
     }
-    if (placeholderDirectionSemantics.maxAngularError > 35) {
+    if (publicMascotDirectionSemantics.maxAngularError > 35) {
       errors.push(
-        `placeholder directions: pupil landmark order deviates by up to ${placeholderDirectionSemantics.maxAngularError.toFixed(
+        `public mascot directions: pupil landmark order deviates by up to ${publicMascotDirectionSemantics.maxAngularError.toFixed(
           1,
         )} degrees`,
       );
@@ -617,7 +633,7 @@ const hoverJumpOffsetsY = [0, -7, -14, -7, 0];
 const hoverJumpPixelMismatches = jumpFrames.map((frame, index) =>
   translatedPixelMismatches(idleBoundaryFrame, frame, hoverJumpOffsetsY[index]),
 );
-if (!placeholderProfile && hoverJumpPixelMismatches.some((count) => count !== 0)) {
+if (hoverJumpPixelMismatches.some((count) => count !== 0)) {
   errors.push(
     `jumping: hover frames must be exact translated idle copies, got mismatches=[${hoverJumpPixelMismatches.join(", ")}]`,
   );
@@ -685,7 +701,7 @@ if (validPoseFrames) {
 const desktopActionAudit = auditDesktopActionPlaybacks(desktopActionPlaybacks, {
   maxCenter: 23,
   minIou: 0.45,
-  maxBaseline: placeholderProfile ? 16 : 12,
+  maxBaseline: 12,
   maxAreaRatio: 1.3,
 });
 const desktopActionSummaries = desktopActionAudit.summaries;
@@ -703,7 +719,9 @@ console.table(
     "min color change": row.minColorChange.toFixed(4),
   })),
 );
-console.log(`Continuity profile: ${placeholderProfile ? "public placeholder (structure + loop safety)" : "coherent pet (strict)"}`);
+console.log(
+  `Continuity profile: ${publicMascotProfile ? "original public mascot (strict geometry + semantic gaze)" : "coherent pet (strict)"}`,
+);
 console.log(
   `Upright character height: ${scaleConsistency.minHeight}-${scaleConsistency.maxHeight}px ` +
   `(ratio ${scaleConsistency.ratio.toFixed(3)}, limit ${scaleConsistency.limit.toFixed(3)})`,
@@ -740,7 +758,7 @@ const auditReport = {
   schema: "codex-pet-continuity-audit/v2",
   generatedAt: new Date().toISOString(),
   ok: errors.length === 0,
-  profile: placeholderProfile ? "public-placeholder" : "coherent-pet-strict",
+  profile: publicMascotProfile ? "original-public-mascot-strict" : "coherent-pet-strict",
   atlas: {
     file: inputPath,
     width: info.width,
@@ -751,6 +769,7 @@ const auditReport = {
   warnings,
   rows: summaries,
   scaleConsistency,
+  edgeAlphaAudit,
   components: {
     thresholdAlpha: COMPONENT_ALPHA_THRESHOLD,
     detached: componentFindings,
@@ -766,7 +785,7 @@ const auditReport = {
     labels: directionLabels,
     medianChangedPixels: directionMedianChange,
     pairs: directionPairs,
-    placeholderSemantics: placeholderDirectionSemantics,
+    publicMascotSemantics: publicMascotDirectionSemantics,
   },
   desktopPoseAtlas: desktopPoseInspection
     ? {

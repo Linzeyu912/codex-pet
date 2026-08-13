@@ -18,7 +18,7 @@ if ($IncludeLocalClassicAssets -and ($env:CI -eq 'true' -or $env:GITHUB_ACTIONS 
 }
 
 $releaseRoot = Join-Path $projectRoot 'release'
-$flavour = if ($IncludeLocalClassicAssets) { 'local-classic' } else { 'public-placeholder' }
+$flavour = if ($IncludeLocalClassicAssets) { 'local-classic' } else { 'public-aurora' }
 $portableRoot = Join-Path $releaseRoot "CodexPet-$version-$flavour"
 $archiveName = if ($IncludeLocalClassicAssets) {
     "Codex-Pet-$version-local-classic-portable.zip"
@@ -92,16 +92,23 @@ if (-not $IncludeLocalClassicAssets -and (Test-Path -LiteralPath $releaseRoot)) 
         }
 }
 
+$previousForcePublicMascot = $env:CODEX_PET_FORCE_PUBLIC_MASCOT
 $previousForcePlaceholder = $env:CODEX_PET_FORCE_PLACEHOLDER
 try {
     if ($IncludeLocalClassicAssets) {
+        Remove-Item Env:CODEX_PET_FORCE_PUBLIC_MASCOT -ErrorAction SilentlyContinue
         Remove-Item Env:CODEX_PET_FORCE_PLACEHOLDER -ErrorAction SilentlyContinue
     } else {
-        $env:CODEX_PET_FORCE_PLACEHOLDER = '1'
+        $env:CODEX_PET_FORCE_PUBLIC_MASCOT = '1'
     }
     & node (Join-Path $projectRoot 'scripts\prepare-local-assets.mjs')
     if ($LASTEXITCODE -ne 0) { throw 'Asset preparation failed.' }
 } finally {
+    if ($null -eq $previousForcePublicMascot) {
+        Remove-Item Env:CODEX_PET_FORCE_PUBLIC_MASCOT -ErrorAction SilentlyContinue
+    } else {
+        $env:CODEX_PET_FORCE_PUBLIC_MASCOT = $previousForcePublicMascot
+    }
     if ($null -eq $previousForcePlaceholder) {
         Remove-Item Env:CODEX_PET_FORCE_PLACEHOLDER -ErrorAction SilentlyContinue
     } else {
@@ -111,9 +118,9 @@ try {
 
 $assetManifestPath = Join-Path $projectRoot 'public\local\pet.json'
 $assetManifest = Get-Content -LiteralPath $assetManifestPath -Raw | ConvertFrom-Json
-$publicSafe = [string]$assetManifest.id -eq 'codex-penguin-placeholder'
+$publicSafe = [string]$assetManifest.id -eq 'codex-aurora-penguin'
 if (-not $IncludeLocalClassicAssets -and -not $publicSafe) {
-    throw "PUBLIC RELEASE BLOCKED: expected codex-penguin-placeholder, got $($assetManifest.id)."
+    throw "PUBLIC RELEASE BLOCKED: expected codex-aurora-penguin, got $($assetManifest.id)."
 }
 if ($IncludeLocalClassicAssets -and $publicSafe) {
     throw 'The explicit local-classic build was requested, but no classic local asset was selected.'

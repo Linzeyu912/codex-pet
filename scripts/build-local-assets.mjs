@@ -36,10 +36,12 @@ const BASE_WIDTH = 160;
 const BASE_HEIGHT = 154;
 const BASELINE_Y = 188;
 const CHARACTER_UPRIGHT_HEIGHT = 181;
+const GENERATED_CHARACTER_UPRIGHT_HEIGHT = 170;
 const CHARACTER_POSE_LONG_SIDE = 181;
 // Hover-jump frames preserve the idle silhouette while moving vertically;
 // failed/lying frames rotate the body and remain excluded from upright scaling.
 const MAIN_ATLAS_UPRIGHT_FRAME_COUNTS = Object.freeze([7, 8, 8, 4, 5, 0, 6, 6, 6, 8, 8]);
+const GENERATED_MAIN_ATLAS_FRAME_COUNTS = Object.freeze([7, 8, 8, 4, 5, 8, 6, 6, 6, 8, 8]);
 const POSE_TARGET_AREA_RATIOS = Object.freeze([
   0.82, 0.82, 0.86, 0.84,
   0.82, 0.82, 0.86, 0.84,
@@ -58,7 +60,8 @@ const coherentRunRoot = path.join(classicRoot, "coherent-v2-run");
 const coherentAtlasPath = path.join(coherentRunRoot, "final", "spritesheet-extended.webp");
 const coherentValidationPath = path.join(coherentRunRoot, "final", "validation-extended.json");
 const coherentRunSummaryPath = path.join(coherentRunRoot, "qa", "run-summary.json");
-const placeholderSourcePath = path.join(projectRoot, "public", "placeholder.svg");
+const publicMascotSourcePath = path.join(projectRoot, "public", "aurora-penguin.png");
+const publicMascotWaveSourcePath = path.join(projectRoot, "public", "aurora-penguin-wave.png");
 const publicRoot = path.join(projectRoot, "public", "local");
 
 const classicManifest = {
@@ -69,35 +72,40 @@ const classicManifest = {
   spritesheetPath: "spritesheet.webp",
 };
 
-const placeholderManifest = {
-  id: "codex-penguin-placeholder",
-  displayName: "Codex Penguin Placeholder",
-  description: "A rights-safe geometric placeholder pet.",
+const publicMascotManifest = {
+  id: "codex-aurora-penguin",
+  displayName: "Aurora Penguin",
+  description: "An original indigo-and-teal desktop companion created for Codex Pet.",
   spriteVersionNumber: 2,
   spritesheetPath: "spritesheet.webp",
 };
 
+function publicMascotIsForced() {
+  return process.env.CODEX_PET_FORCE_PUBLIC_MASCOT === "1"
+    || process.env.CODEX_PET_FORCE_PLACEHOLDER === "1";
+}
+
 async function resolveSource() {
-  if (process.env.CODEX_PET_FORCE_PLACEHOLDER !== "1") {
+  if (!publicMascotIsForced()) {
     try {
       await fs.access(classicSourcePath);
       return {
         sourcePath: classicSourcePath,
         outputRoot: path.join(classicRoot, "codex-pet"),
         manifest: classicManifest,
-        usedPlaceholder: false,
+        usedPublicMascot: false,
       };
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
-      // Fall through to the rights-safe placeholder only when the classic source is absent.
+      // Fall through to the redistributable original mascot when the private source is absent.
     }
   }
-  await fs.access(placeholderSourcePath);
+  await fs.access(publicMascotSourcePath);
   return {
-    sourcePath: placeholderSourcePath,
-    outputRoot: path.join(projectRoot, ".local-assets", "placeholder", "codex-pet"),
-    manifest: placeholderManifest,
-    usedPlaceholder: true,
+    sourcePath: publicMascotSourcePath,
+    outputRoot: path.join(projectRoot, ".local-assets", "public-mascot", "codex-pet"),
+    manifest: publicMascotManifest,
+    usedPublicMascot: true,
   };
 }
 
@@ -409,6 +417,37 @@ async function normalizeBase(inputPath) {
   return { data: normalized, width: info.width, height: info.height };
 }
 
+async function normalizeVariantSource(inputPath, anchorPath) {
+  const [variant, anchor] = await Promise.all([
+    cleanSourceAndFindSubject(inputPath),
+    cleanSourceAndFindSubject(anchorPath),
+  ]);
+  const anchorWidth = anchor.bounds.maxX - anchor.bounds.minX + 1;
+  const anchorHeight = anchor.bounds.maxY - anchor.bounds.minY + 1;
+  const variantWidth = variant.bounds.maxX - variant.bounds.minX + 1;
+  const variantHeight = variant.bounds.maxY - variant.bounds.minY + 1;
+  const targetWidth = Math.max(2, Math.round((variantWidth * BASE_WIDTH) / anchorWidth));
+  const targetHeight = Math.max(2, Math.round((variantHeight * BASE_HEIGHT) / anchorHeight));
+  const quantized = await sharp(variant.data, {
+    raw: { width: variant.width, height: variant.height, channels: 4 },
+  })
+    .extract({
+      left: variant.bounds.minX,
+      top: variant.bounds.minY,
+      width: variantWidth,
+      height: variantHeight,
+    })
+    .resize(targetWidth, targetHeight, { fit: "fill", kernel: sharp.kernel.nearest })
+    .png({ palette: true, colours: 24, dither: 0 })
+    .toBuffer();
+  const { data, info } = await sharp(quantized).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const normalized = Buffer.from(data);
+  for (let offset = 0; offset < normalized.length; offset += 4) {
+    if (normalized[offset + 3] === 0) clearPixel(normalized, offset);
+  }
+  return { data: normalized, width: info.width, height: info.height };
+}
+
 async function normalizePoseCell(sheetData, sheetWidth, sheetHeight, cell) {
   const { data: extracted, info } = await sharp(sheetData, {
     raw: { width: sheetWidth, height: sheetHeight, channels: 4 },
@@ -706,7 +745,7 @@ function clearRemoteLowAlphaPixels(data, width, height) {
   }
 }
 
-function normalizeRawFrameExtent(frame, { metric, targetExtent }) {
+function normalizeRawFrameExtent(frame, { metric, targetExtent, padding = 2 }) {
   const before = inspectRawPoseFrame(frame);
   const beforeExtent = metric === "height" ? before.height : Math.max(before.width, before.height);
   if (beforeExtent === targetExtent) {
@@ -714,7 +753,6 @@ function normalizeRawFrameExtent(frame, { metric, targetExtent }) {
   }
 
   const scale = targetExtent / beforeExtent;
-  const padding = 2;
   const cropLeft = Math.max(0, before.left - padding);
   const cropTop = Math.max(0, before.top - padding);
   const cropRight = Math.min(frame.width - 1, before.right + padding);
@@ -764,6 +802,7 @@ function normalizeAtlasFrameExtents(atlas, atlasWidth, {
   frameCounts,
   metric,
   targetExtent,
+  padding = 2,
 }) {
   if (frameCounts.length !== rows) throw new Error(`Expected ${rows} frame-count entries, got ${frameCounts.length}.`);
   const output = Buffer.from(atlas);
@@ -778,7 +817,7 @@ function normalizeAtlasFrameExtents(atlas, atlasWidth, {
       const cell = extractRawRegion(atlas, atlasWidth, cellLeft, cellTop, CELL_WIDTH, CELL_HEIGHT);
       const normalized = normalizeRawFrameExtent(
         { data: cell, width: CELL_WIDTH, height: CELL_HEIGHT },
-        { metric, targetExtent },
+        { metric, targetExtent, padding },
       );
       beforeExtents.push(
         metric === "height" ? normalized.before.height : Math.max(normalized.before.width, normalized.before.height),
@@ -839,15 +878,37 @@ function isEyeInk(r, g, b, a) {
   return a > 0 && r < 70 && g < 70 && b < 80;
 }
 
+function isIrisHighlight(r, g, b, a) {
+  return a > 0 && g > 70 && b > 100 && b > r * 1.4;
+}
+
 function movePupils(source, width, height, dx, dy) {
   if (!dx && !dy) return Buffer.from(source);
   const output = Buffer.from(source);
   const eyeRegions = [
-    { left: 55, right: 80, top: 24, bottom: 57 },
-    { left: 83, right: 109, top: 24, bottom: 57 },
+    { left: 50, right: 81, featureLeft: 55, featureRight: 78, top: 28, bottom: 58 },
+    { left: 82, right: 112, featureLeft: 86, featureRight: 108, top: 28, bottom: 58 },
   ];
 
   for (const region of eyeRegions) {
+    const irisPixels = [];
+    for (let y = region.top; y <= region.bottom && y < height; y += 1) {
+      for (let x = region.featureLeft; x <= region.featureRight && x < width; x += 1) {
+        const offset = pixelOffset(x, y, width);
+        if (!isIrisHighlight(output[offset], output[offset + 1], output[offset + 2], output[offset + 3])) continue;
+        irisPixels.push({ x, y, rgba: Buffer.from(output.subarray(offset, offset + 4)) });
+      }
+    }
+    if (irisPixels.length >= 4) {
+      for (const pixel of irisPixels) output.set([1, 7, 28, 255], pixelOffset(pixel.x, pixel.y, width));
+      for (const pixel of irisPixels) {
+        const x = Math.max(region.left, Math.min(region.right, pixel.x + dx));
+        const y = Math.max(region.top, Math.min(region.bottom, pixel.y + dy));
+        output.set(pixel.rgba, pixelOffset(x, y, width));
+      }
+      continue;
+    }
+
     const pupilPixels = [];
     for (let y = region.top; y <= region.bottom && y < height; y += 1) {
       for (let x = region.left; x <= region.right && x < width; x += 1) {
@@ -872,6 +933,41 @@ function movePupils(source, width, height, dx, dy) {
 
 function blink(source, width, height, half = false) {
   const output = Buffer.from(source);
+  let irisPixels = 0;
+  for (let y = 28; y <= 58 && y < height; y += 1) {
+    for (let x = 54; x <= 108 && x < width; x += 1) {
+      const offset = pixelOffset(x, y, width);
+      if (isIrisHighlight(output[offset], output[offset + 1], output[offset + 2], output[offset + 3])) irisPixels += 1;
+    }
+  }
+  if (irisPixels >= 8) {
+    const face = [253, 250, 235, 255];
+    const eyelid = [23, 42, 97, 255];
+    const regions = [
+      { left: 55, right: 78, top: 29, bottom: 57 },
+      { left: 86, right: 109, top: 29, bottom: 57 },
+    ];
+    for (const region of regions) {
+      const centerX = Math.round((region.left + region.right) / 2);
+      for (let y = region.top; y <= region.bottom && y < height; y += 1) {
+        for (let x = region.left; x <= region.right && x < width; x += 1) {
+          const normalizedX = (x - centerX) / 12;
+          const normalizedY = (y - 43) / 15;
+          if (normalizedX * normalizedX + normalizedY * normalizedY > 1) continue;
+          const offset = pixelOffset(x, y, width);
+          if (output[offset + 3] > 0) output.set(face, offset);
+        }
+      }
+      const lineY = half ? 42 : 45;
+      for (let x = region.left + 5; x <= region.right - 5; x += 1) {
+        const arcY = lineY + (Math.abs(x - centerX) >= 5 ? -1 : 0);
+        output.set(eyelid, pixelOffset(x, arcY, width));
+        output.set(eyelid, pixelOffset(x, arcY + 1, width));
+      }
+    }
+    return output;
+  }
+
   const body = [16, 24, 53, 255];
   const regions = [
     { left: 52, right: 80 },
@@ -1306,7 +1402,7 @@ export async function repairCoherentAtlas(inputPath) {
   };
 }
 
-function createFrameRows(poseFrames = null) {
+function createFrameRows(poseFrames = null, publicWaveFrame = null) {
   const fallbackRunningRight = [
     { shear: 2, dy: 0 },
     { shear: 4, dx: 2, dy: 2, scaleY: 0.97 },
@@ -1339,12 +1435,14 @@ function createFrameRows(poseFrames = null) {
   const runningLeft = poseFrames
     ? [0, 1, 2, 3, 0, 1, 2, 3].map((index) => ({ source: poseFrames[index] }))
     : fallbackRunningLeft;
-  const waving = [
-    {},
-    { wingAngle: -40, dy: -2 },
-    { wingAngle: -88, dy: -5 },
-    { wingAngle: -40, dy: -2 },
-  ];
+  const waving = publicWaveFrame
+    ? [{}, { source: publicWaveFrame, dy: -1 }, { source: publicWaveFrame, dy: -3 }, { source: publicWaveFrame, dy: -1 }]
+    : [
+        {},
+        { wingAngle: -18, dy: -1 },
+        { wingAngle: -28, dy: -3 },
+        { wingAngle: -18, dy: -1 },
+      ];
   const jumping = poseFrames
     ? [
         { source: poseFrames[11] },
@@ -1362,12 +1460,16 @@ function createFrameRows(poseFrames = null) {
       ];
   const failed = poseFrames
     ? [12, 13, 14, 13, 12, 13, 14, 15].map((index) => ({ source: poseFrames[index] }))
-    : [0, -2, 2, -2, 0, 2, -2, 0].map((dx, index) => ({
-        dx,
-        dy: [2, 3, 4, 5, 6, 5, 4, 3][index],
-        scaleY: 0.97,
-        halfBlink: true,
-      }));
+    : [
+        {},
+        { dx: -2, dy: 2, scaleY: 0.99, halfBlink: true },
+        { dx: 2, dy: 4, scaleY: 0.98, halfBlink: true },
+        { dx: -2, dy: 5, scaleY: 0.97, halfBlink: true },
+        { dy: 6, scaleY: 0.97, halfBlink: true },
+        { dx: 2, dy: 5, scaleY: 0.97, halfBlink: true },
+        { dx: -2, dy: 4, scaleY: 0.98, halfBlink: true },
+        { dy: 2, scaleY: 0.99, halfBlink: true },
+      ];
   const waiting = poseFrames
     ? [8, 9, 8, 10, 11, 10].map((index) => ({ source: poseFrames[index] }))
     : [
@@ -1421,7 +1523,7 @@ function createFrameRows(poseFrames = null) {
 
 export async function buildLocalAssets({ copyToPublic = true } = {}) {
   const approvedCoherentAtlas =
-    process.env.CODEX_PET_FORCE_PLACEHOLDER === "1" || process.env.CODEX_PET_FORCE_FALLBACK === "1"
+    publicMascotIsForced() || process.env.CODEX_PET_FORCE_FALLBACK === "1"
       ? null
       : await resolveValidatedCoherentAtlas();
   const resolution = approvedCoherentAtlas
@@ -1429,12 +1531,12 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
         sourcePath: classicSourcePath,
         outputRoot: path.join(classicRoot, "codex-pet"),
         manifest: classicManifest,
-        usedPlaceholder: false,
+        usedPublicMascot: false,
       }
     : await resolveSource();
-  const { sourcePath, outputRoot, manifest, usedPlaceholder } = resolution;
-  if (usedPlaceholder) {
-    console.log("No local classic-penguin source found; building the rights-safe placeholder pet.");
+  const { sourcePath, outputRoot, manifest, usedPublicMascot } = resolution;
+  if (usedPublicMascot) {
+    console.log("Building the redistributable original Aurora Penguin mascot.");
   }
 
   const localPaths = {
@@ -1486,7 +1588,10 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
     if (!approvedCoherentAtlas || error?.code !== "ENOENT") throw error;
   }
 
-  const poseFrames = usedPlaceholder ? null : await loadPoseFrames(classicPoseSheetPath);
+  const poseFrames = usedPublicMascot ? null : await loadPoseFrames(classicPoseSheetPath);
+  const publicWaveFrame = usedPublicMascot
+    ? await normalizeVariantSource(publicMascotWaveSourcePath, publicMascotSourcePath)
+    : null;
   let poseReferenceAtlas = approvedCoherentAtlas;
   if (poseFrames && process.env.CODEX_PET_POSE_REFERENCE_ATLAS) {
     poseReferenceAtlas = path.resolve(projectRoot, process.env.CODEX_PET_POSE_REFERENCE_ATLAS);
@@ -1513,20 +1618,34 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
       console.log(`Using 16 local side/back/playful pose frames: ${classicPoseSheetPath}`);
     }
     const atlas = Buffer.alloc(ATLAS_WIDTH * ATLAS_HEIGHT * 4);
-    const rows = createFrameRows(poseFrames);
+    const rows = createFrameRows(poseFrames, publicWaveFrame);
     rows.forEach((rowFrames, row) => {
       rowFrames.forEach((spec, column) => compositeFrame(atlas, makeFrame(base, spec), column, row));
     });
 
     // Current official V2 validator requires a neutral QA frame in row 0, column 6.
     compositeFrame(atlas, makeFrame(base), 6, 0);
-    const atlasImage = sharp(atlas, {
+    const hoverJump = stabilizeHoverJumpFrames(atlas, ATLAS_WIDTH);
+    const stabilized = normalizeAtlasFrameExtents(hoverJump.data, ATLAS_WIDTH, {
+      columns: ATLAS_COLUMNS,
+      rows: ATLAS_ROWS,
+      frameCounts: GENERATED_MAIN_ATLAS_FRAME_COUNTS,
+      metric: "height",
+      targetExtent: GENERATED_CHARACTER_UPRIGHT_HEIGHT,
+      padding: 0,
+    });
+    const atlasImage = sharp(stabilized.data, {
       raw: { width: ATLAS_WIDTH, height: ATLAS_HEIGHT, channels: 4 },
     });
     [spritesheetBuffer, pngSpritesheetBuffer] = await Promise.all([
       atlasImage.clone().webp({ lossless: true, quality: 100, alphaQuality: 100 }).toBuffer(),
       atlasImage.clone().png({ palette: false, compressionLevel: 9 }).toBuffer(),
     ]);
+    console.log(
+      `Normalized generated atlas: ${stabilized.changedFrames} upright frames changed from ` +
+        `${stabilized.beforeMin}-${stabilized.beforeMax}px to ${stabilized.afterMin}-${stabilized.afterMax}px; ` +
+        `hover jump y=[${hoverJump.centersY.map((value) => value.toFixed(1)).join(",")}].`,
+    );
   }
 
   const materializedTrees = [];
@@ -1584,7 +1703,7 @@ export async function buildLocalAssets({ copyToPublic = true } = {}) {
     pngSpritesheetPath: localPaths.pngSpritesheet,
     normalizedPath,
     petId: manifest.id,
-    usedPlaceholder,
+    usedPublicMascot,
     usedCoherentAtlas: Boolean(approvedCoherentAtlas),
     desktopPosesPath,
     hasDesktopPoses: Boolean(desktopPosesPath),
