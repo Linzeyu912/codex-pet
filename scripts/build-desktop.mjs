@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
 import { projectRoot } from "./lib/project-utils.mjs";
 
@@ -6,6 +6,17 @@ const publicEnvironment = {
   ...process.env,
   CODEX_PET_FORCE_PUBLIC_MASCOT: "1",
 };
+
+const forwardedArguments = process.argv.slice(2);
+const profile = forwardedArguments.includes("--debug") ? "debug" : "release";
+if (profile === "release") {
+  const dirtyFiles = execFileSync(
+    "git",
+    ["-C", projectRoot, "diff", "--name-only", "HEAD", "--"],
+    { encoding: "utf8" },
+  ).trim();
+  if (dirtyFiles) throw new Error(`Formal release builds require a clean worktree:\n${dirtyFiles}`);
+}
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -19,16 +30,17 @@ function run(command, args) {
 }
 
 run(process.execPath, ["scripts/prepare-local-assets.mjs"]);
-const forwardedArguments = process.argv.slice(2);
 run(process.execPath, [
   "node_modules/@tauri-apps/cli/tauri.js",
   "build",
   "--bundles",
   "nsis",
   ...forwardedArguments,
+  "--",
+  "--locked",
 ]);
 run(process.execPath, [
   "scripts/write-release-metadata.mjs",
   "--profile",
-  forwardedArguments.includes("--debug") ? "debug" : "release",
+  profile,
 ]);

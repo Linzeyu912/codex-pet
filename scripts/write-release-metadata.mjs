@@ -30,11 +30,14 @@ const artifact = path.basename(installerPath);
 const stats = await fs.stat(installerPath);
 const sha256 = await sha256File(installerPath);
 const commit = execFileSync("git", ["-C", projectRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-const sourceDirty = Boolean(
-  execFileSync("git", ["-C", projectRoot, "status", "--porcelain", "--untracked-files=no"], {
-    encoding: "utf8",
-  }).trim(),
-);
+const dirtyFiles = execFileSync(
+  "git",
+  ["-C", projectRoot, "diff", "--name-only", "HEAD", "--"],
+  { encoding: "utf8" },
+)
+  .split(/\r?\n/)
+  .filter(Boolean);
+const sourceDirty = dirtyFiles.length > 0;
 const metadata = {
   schema: "codex-pet-release/v1",
   version: packageJson.version,
@@ -44,9 +47,11 @@ const metadata = {
   sha256,
   commit,
   sourceDirty,
+  dirtyFiles,
   builtAt: new Date().toISOString(),
 };
 
 await fs.writeFile(`${installerPath}.sha256`, `${sha256}  ${artifact}\n`, "utf8");
 await fs.writeFile(`${installerPath}.release.json`, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
 console.log(`Release metadata written (${profile}): ${artifact}`);
+if (dirtyFiles.length > 0) console.warn(`Tracked files changed during the build: ${dirtyFiles.join(", ")}`);

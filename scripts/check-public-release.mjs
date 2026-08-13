@@ -105,11 +105,13 @@ if (matchingInstallers.length !== 1) {
       const currentCommit = execFileSync("git", ["-C", projectRoot, "rev-parse", "HEAD"], {
         encoding: "utf8",
       }).trim();
-      const currentDirty = Boolean(
-        execFileSync("git", ["-C", projectRoot, "status", "--porcelain", "--untracked-files=no"], {
-          encoding: "utf8",
-        }).trim(),
-      );
+      const currentDirtyFiles = execFileSync(
+        "git",
+        ["-C", projectRoot, "diff", "--name-only", "HEAD", "--"],
+        { encoding: "utf8" },
+      )
+        .split(/\r?\n/)
+        .filter(Boolean);
       const builtAt = Date.parse(metadata.builtAt);
       if (metadata.schema !== "codex-pet-release/v1") violations.push(`unexpected release metadata schema: ${metadata.schema}`);
       if (metadata.version !== version) violations.push(`release metadata version is ${metadata.version}`);
@@ -118,11 +120,20 @@ if (matchingInstallers.length !== 1) {
       if (metadata.bytes !== stats.size) violations.push("release metadata artifact size differs");
       if (metadata.sha256 !== actualSha256) violations.push("release metadata SHA-256 differs");
       if (metadata.commit !== currentCommit) violations.push("release metadata was built from a different commit");
+      if (!Array.isArray(metadata.dirtyFiles) || metadata.dirtyFiles.some((file) => typeof file !== "string")) {
+        violations.push("release metadata dirtyFiles is invalid");
+      }
       if (!Number.isFinite(builtAt) || builtAt + 5_000 < stats.mtimeMs || builtAt > Date.now() + 300_000) {
         violations.push("release metadata build time is invalid or older than the installer");
       }
-      if (profile === "release" && (metadata.sourceDirty !== false || currentDirty)) {
-        violations.push("formal release artifacts must be built from a clean worktree");
+      if (profile === "release" && (metadata.sourceDirty !== false || currentDirtyFiles.length > 0)) {
+        const dirtyFiles = [
+          ...(Array.isArray(metadata.dirtyFiles) ? metadata.dirtyFiles : []),
+          ...currentDirtyFiles,
+        ];
+        violations.push(
+          `formal release artifacts must be built from a clean worktree${dirtyFiles.length ? `: ${[...new Set(dirtyFiles)].join(", ")}` : ""}`,
+        );
       }
     }
   }
