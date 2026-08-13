@@ -1,14 +1,17 @@
 import {
   beginWindowDrag,
   endWindowDrag,
+  getCodexIntegrationStatus,
   getPetMovementBounds,
   hidePet,
   isAutostartEnabled,
+  installCodexIntegration,
   movePetWindow,
   quitApp,
   readPetState,
   setAutostart,
   type PetStatePayload,
+  type CodexIntegrationStatus,
   type WindowPosition,
 } from "./desktop-bridge";
 import "./style.css";
@@ -74,6 +77,7 @@ const POSE_ATLAS_WIDTH = 768;
 const POSE_ATLAS_HEIGHT = 832;
 const LEGACY_STATE_TTL_MS = 15 * 60 * 1000;
 const AUTO_ROAM_STORAGE_KEY = "codex-pet:auto-roam";
+const ONBOARDING_DISMISSED_KEY = "codex-pet:onboarding-dismissed:1";
 const ATLAS_URL = new URL("./local/spritesheet.webp", window.location.href).href;
 const POSE_ATLAS_URL = new URL("./local/desktop-poses.png", window.location.href).href;
 
@@ -251,6 +255,8 @@ app.innerHTML = `
     </div>
   </section>
   <div class="context-menu" id="pet-menu" role="menu" aria-label="宠物菜单" hidden>
+    <button type="button" role="menuitem" data-command="codex-integration">连接 Codex…</button>
+    <div class="menu-separator" role="separator"></div>
     <button type="button" role="menuitemcheckbox" aria-checked="false" data-command="pause">暂停动画</button>
     <button type="button" role="menuitemcheckbox" aria-checked="true" data-command="auto-roam">自动闲逛</button>
     <button type="button" role="menuitem" data-command="demo">换个动作</button>
@@ -266,6 +272,15 @@ app.innerHTML = `
     <button type="button" role="menuitem" data-command="hide">暂时隐藏</button>
     <button type="button" role="menuitem" data-command="quit" class="danger">退出 Codex Pet</button>
   </div>
+  <section class="onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" hidden>
+    <h2 id="onboarding-title">让 Aurora 认识 Codex</h2>
+    <p class="onboarding-status">一键安装宠物素材，并在任务完成时让它跳起来。</p>
+    <p class="onboarding-path" hidden></p>
+    <div class="onboarding-actions">
+      <button type="button" class="primary" data-onboarding="install">一键连接</button>
+      <button type="button" data-onboarding="dismiss">稍后</button>
+    </div>
+  </section>
 `;
 
 const sprite = app.querySelector<HTMLElement>(".sprite")!;
@@ -276,6 +291,10 @@ const pauseButton = app.querySelector<HTMLButtonElement>("[data-command='pause']
 const autoRoamButton = app.querySelector<HTMLButtonElement>("[data-command='auto-roam']")!;
 const autostartButton = app.querySelector<HTMLButtonElement>("[data-command='autostart']")!;
 const shell = app.querySelector<HTMLElement>(".pet-shell")!;
+const onboarding = app.querySelector<HTMLElement>(".onboarding")!;
+const onboardingStatus = app.querySelector<HTMLElement>(".onboarding-status")!;
+const onboardingPath = app.querySelector<HTMLElement>(".onboarding-path")!;
+const onboardingInstall = app.querySelector<HTMLButtonElement>("[data-onboarding='install']")!;
 const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 let action: PetAction = "idle";
@@ -351,6 +370,83 @@ function showNotice(message: string): void {
     delete shell.dataset.notice;
     bubbleLabel.textContent = animations[action].label;
   }, 2400);
+}
+
+function integrationReady(status: CodexIntegrationStatus): boolean {
+  return status.petInstalled && status.notifyConfigured;
+}
+
+function renderIntegrationStatus(status: CodexIntegrationStatus): void {
+  onboardingPath.hidden = true;
+  if (integrationReady(status)) {
+    onboardingStatus.textContent = "已连接。任务完成时 Aurora 会跳起来；可在 Codex 的 Pets 中选择它。";
+    onboardingInstall.textContent = "完成";
+    onboardingInstall.disabled = false;
+    onboardingInstall.dataset.complete = "true";
+  } else if (status.notifyConflict) {
+    onboardingStatus.textContent = status.petInstalled
+      ? "宠物素材已安装，但检测到已有 notify 配置。为了不覆盖你的命令，通知桥接未改动。"
+      : "检测到已有 notify 配置。连接时会保留它，不会静默覆盖。";
+    onboardingPath.textContent = `配置文件：${status.configPath}`;
+    onboardingPath.hidden = false;
+    onboardingInstall.textContent = status.petInstalled ? "重新检查" : "安装宠物素材";
+    onboardingInstall.disabled = false;
+    delete onboardingInstall.dataset.complete;
+  } else {
+    onboardingStatus.textContent = "一键安装 Aurora 宠物素材，并在 Codex 任务完成时让它跳起来。";
+    onboardingInstall.textContent = "一键连接";
+    onboardingInstall.disabled = false;
+    delete onboardingInstall.dataset.complete;
+  }
+}
+
+function openOnboarding(): void {
+  closeMenu();
+  cancelAutoRoamMovement();
+  nextAutoActionAt = Number.POSITIVE_INFINITY;
+  onboarding.hidden = false;
+  shell.setAttribute("aria-hidden", "true");
+  onboardingInstall.focus({ preventScroll: true });
+}
+
+function closeOnboarding(): void {
+  onboarding.hidden = true;
+  shell.removeAttribute("aria-hidden");
+  shell.focus({ preventScroll: true });
+  scheduleNextAutoAction();
+}
+
+async function refreshIntegrationStatus(showWhenIncomplete = false): Promise<void> {
+  try {
+    const status = await getCodexIntegrationStatus();
+    renderIntegrationStatus(status);
+    if (showWhenIncomplete && !integrationReady(status)) openOnboarding();
+  } catch {
+    // Browser-only previews do not expose the native integration bridge.
+  }
+}
+
+async function connectCodex(): Promise<void> {
+  if (onboardingInstall.dataset.complete === "true") {
+    window.localStorage.setItem(ONBOARDING_DISMISSED_KEY, "true");
+    closeOnboarding();
+    return;
+  }
+  onboardingInstall.disabled = true;
+  onboardingStatus.textContent = "正在安全安装并检查 Codex 配置…";
+  onboardingPath.hidden = true;
+  try {
+    const status = await installCodexIntegration();
+    renderIntegrationStatus(status);
+    if (integrationReady(status)) {
+      window.localStorage.setItem(ONBOARDING_DISMISSED_KEY, "true");
+      startLocalAction("jumping");
+    }
+  } catch (error) {
+    onboardingStatus.textContent = typeof error === "string" ? error : "连接失败，未覆盖现有配置。";
+    onboardingInstall.textContent = "重试";
+    onboardingInstall.disabled = false;
+  }
 }
 
 function randomBetween(minimum: number, maximum: number): number {
@@ -718,6 +814,10 @@ async function runCommand(command: string): Promise<void> {
       startLocalAction(demoOrder[nextIndex]);
       break;
     }
+    case "codex-integration":
+      await refreshIntegrationStatus();
+      openOnboarding();
+      break;
     case "autostart":
       try {
         const enabled = !(await isAutostartEnabled());
@@ -905,6 +1005,23 @@ menu.addEventListener("keydown", (event) => {
 
 window.addEventListener("resize", () => closeMenu());
 
+onboarding.addEventListener("click", (event) => {
+  const command = (event.target as HTMLElement).closest<HTMLButtonElement>("button")?.dataset.onboarding;
+  if (command === "install") void connectCodex();
+  if (command === "dismiss") {
+    window.localStorage.setItem(ONBOARDING_DISMISSED_KEY, "true");
+    closeOnboarding();
+  }
+});
+
+onboarding.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    window.localStorage.setItem(ONBOARDING_DISMISSED_KEY, "true");
+    closeOnboarding();
+  }
+});
+
 reducedMotionQuery.addEventListener("change", (event) => {
   reducedMotion = event.matches;
   if (reducedMotion && localActionKind === "auto") resumeDesiredAction();
@@ -920,4 +1037,5 @@ reducedMotionQuery.addEventListener("change", (event) => {
 syncMotionControl();
 void detectAtlas();
 void pollPetState();
+void refreshIntegrationStatus(window.localStorage.getItem(ONBOARDING_DISMISSED_KEY) !== "true");
 requestAnimationFrame(tick);

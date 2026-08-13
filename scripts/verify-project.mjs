@@ -74,16 +74,14 @@ if (withTauri) {
     "--locked",
     "--manifest-path",
     "src-tauri/Cargo.toml",
-  ], { optional: !ci, timeout: 20 * 60 * 1000 });
-  if (ci) {
-    run("Rust/Tauri unit tests", "cargo", [
-      "test",
-      "--locked",
-      "--lib",
-      "--manifest-path",
-      "src-tauri/Cargo.toml",
-    ], { timeout: 20 * 60 * 1000 });
-  }
+  ], { timeout: 20 * 60 * 1000 });
+  run("Rust/Tauri unit tests", "cargo", [
+    "test",
+    "--locked",
+    "--lib",
+    "--manifest-path",
+    "src-tauri/Cargo.toml",
+  ], { timeout: 20 * 60 * 1000 });
 }
 
 if (release) {

@@ -119,11 +119,13 @@ public/local/desktop-poses.png
 
 兼容旧格式：缺少、空白或非字符串的 `sessionId` 使用 `legacy`；非 `idle` 且缺少、无效或非正数的 `expiresAt` 时，以 `updatedAt + 15 分钟` 作为过期时间，防止陈旧状态永久占用。文件通过唯一临时文件和原子重命名写入，多个通知并发时不会暴露半写 JSON。
 
-Codex 官方外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications) 当前只提供 `agent-turn-complete`，并在单个 JSON 参数中使用 `thread-id` 标识会话。本项目把该事件映射为 `jumping`，同时保留第三方桥接器的自定义失败事件兼容。
+Codex 官方外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications) 当前只提供 `agent-turn-complete`，并在单个 JSON 参数中使用 `thread-id` 标识会话。公共桌面程序自身支持 `--codex-notify <JSON>`，无需 Node.js 即可把该事件原子写成短时 `jumping` 状态；源码桥接脚本继续保留第三方自定义失败事件兼容。
 
 桌面扩展状态为 `looking`、`mischief`、`lying`、`rolling`。本地拖拽/演示与远端状态的时间戳、会话分别维护；交互结束后仍可恢复尚未完成且未过期的远端状态。
 
 ## 安装、升级与卸载约束
+
+公共桌面版的首次启动引导复用相同的 ownership receipt 契约，并额外遵守用户配置边界：只修改用户级 `%CODEX_HOME%/config.toml`；仅当顶层 `notify` 不存在时写入 `["<当前 Codex Pet.exe>", "--codex-notify"]`；已有任意其他 `notify` 时报告冲突并保持文件逐字不变。配置文件或宠物目标是链接/junction 时拒绝写入。修改通知配置后需要重启 Codex 客户端。
 
 安装器仅复制 `pet.json` 与 `spritesheet.webp`，并创建 ownership receipt：
 

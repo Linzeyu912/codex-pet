@@ -10,6 +10,9 @@ All notable project changes are recorded here. The format follows
 
 - Original MIT-licensed Aurora Penguin public character sources, including a
   dedicated connected-flipper waving pose.
+- First-run Codex onboarding that atomically installs the bundled public pet,
+  preserves existing notification commands, and configures the packaged
+  executable as a dependency-free `agent-turn-complete` receiver.
 
 ### Changed
 

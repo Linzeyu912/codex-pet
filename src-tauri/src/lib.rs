@@ -2,7 +2,9 @@ use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize,
 };
+use sha2::{Digest, Sha256};
 use std::{
+    ffi::OsString,
     fs::{self, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
@@ -14,6 +16,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
+use toml_edit::{value, Array, DocumentMut};
 
 const VALID_STATES: [&str; 13] = [
     "idle",
@@ -31,6 +34,11 @@ const VALID_STATES: [&str; 13] = [
     "mischief",
 ];
 const MAX_SAFE_UPDATED_AT: u64 = 9_007_199_254_740_991;
+const PUBLIC_PET_ID: &str = "codex-aurora-penguin";
+const INSTALL_OWNER: &str = "io.github.linzeyu912.codex-pet";
+const INSTALL_RECEIPT: &str = ".codex-pet-install-receipt.json";
+const PET_MANIFEST_BYTES: &[u8] = include_bytes!("../../public/local/pet.json");
+const PET_SPRITESHEET_BYTES: &[u8] = include_bytes!("../../public/local/spritesheet.webp");
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -128,6 +136,24 @@ struct WindowMovementBounds {
     max_y: f64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexIntegrationStatus {
+    pet_installed: bool,
+    notify_configured: bool,
+    notify_conflict: bool,
+    codex_home: String,
+    config_path: String,
+}
+
+#[derive(Deserialize)]
+struct CodexNotification {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(rename = "thread-id")]
+    thread_id: Option<String>,
+}
+
 fn logical_movement_bounds(
     work_x: i32,
     work_y: i32,
@@ -170,6 +196,18 @@ fn state_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     home.join(".codex-pet").join("state.json")
+}
+
+fn codex_home() -> PathBuf {
+    std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .or_else(|| std::env::var_os("HOME"))
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir)
+                .join(".codex")
+        })
 }
 
 fn now_millis() -> u64 {
@@ -282,6 +320,332 @@ fn write_state_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+fn sha256_hex(contents: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(contents))
+}
+
+fn path_for_config(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn paths_match(left: &str, right: &Path) -> bool {
+    let left = left.replace('\\', "/");
+    let right = path_for_config(right);
+    if cfg!(windows) {
+        left.eq_ignore_ascii_case(&right)
+    } else {
+        left == right
+    }
+}
+
+fn expected_notify(executable: &Path) -> [String; 2] {
+    [path_for_config(executable), "--codex-notify".into()]
+}
+
+fn notify_matches(document: &DocumentMut, executable: &Path) -> bool {
+    let expected = expected_notify(executable);
+    let Some(array) = document.get("notify").and_then(|item| item.as_array()) else {
+        return false;
+    };
+    array.len() == expected.len()
+        && array.iter().zip(expected.iter()).all(|(item, expected)| {
+            item.as_str()
+                .is_some_and(|value| paths_match(value, Path::new(expected)))
+        })
+}
+
+fn read_config_document(config_path: &Path) -> Result<DocumentMut, String> {
+    match fs::read_to_string(config_path) {
+        Ok(contents) => contents
+            .parse::<DocumentMut>()
+            .map_err(|error| format!("无法解析 Codex 配置 {}: {error}", config_path.display())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(DocumentMut::new()),
+        Err(error) => Err(format!(
+            "无法读取 Codex 配置 {}: {error}",
+            config_path.display()
+        )),
+    }
+}
+
+fn reject_link(path: &Path, label: &str) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            let mut is_link = metadata.file_type().is_symlink();
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+                is_link |= metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+            }
+            if is_link {
+                Err(format!("{label}不能是链接或 junction：{}", path.display()))
+            } else {
+                Ok(())
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("无法检查{label} {}: {error}", path.display())),
+    }
+}
+
+fn configure_notify(config_path: &Path, executable: &Path) -> Result<(bool, bool), String> {
+    reject_link(config_path, "Codex 配置文件")?;
+    let mut document = read_config_document(config_path)?;
+    if notify_matches(&document, executable) {
+        return Ok((true, false));
+    }
+    if document.get("notify").is_some() {
+        return Ok((false, true));
+    }
+
+    let mut command = Array::new();
+    for argument in expected_notify(executable) {
+        command.push(argument);
+    }
+    document["notify"] = value(command);
+    write_state_atomically(config_path, document.to_string().as_bytes())
+        .map_err(|error| format!("无法更新 Codex 配置 {}: {error}", config_path.display()))?;
+    Ok((true, false))
+}
+
+fn integration_paths() -> (PathBuf, PathBuf, PathBuf) {
+    let home = codex_home();
+    let destination = home.join("pets").join(PUBLIC_PET_ID);
+    let config = home.join("config.toml");
+    (home, destination, config)
+}
+
+fn file_matches(path: &Path, expected: &[u8]) -> bool {
+    fs::read(path)
+        .map(|contents| contents == expected)
+        .unwrap_or(false)
+}
+
+fn public_pet_is_current(destination: &Path) -> bool {
+    file_matches(&destination.join("pet.json"), PET_MANIFEST_BYTES)
+        && file_matches(&destination.join("spritesheet.webp"), PET_SPRITESHEET_BYTES)
+}
+
+fn owned_install_is_unmodified(destination: &Path) -> bool {
+    let Ok(receipt_text) = fs::read_to_string(destination.join(INSTALL_RECEIPT)) else {
+        return false;
+    };
+    let Ok(receipt) = serde_json::from_str::<serde_json::Value>(&receipt_text) else {
+        return false;
+    };
+    if receipt.get("owner").and_then(serde_json::Value::as_str) != Some(INSTALL_OWNER)
+        || receipt
+            .get("schemaVersion")
+            .and_then(serde_json::Value::as_u64)
+            != Some(1)
+        || receipt.get("petId").and_then(serde_json::Value::as_str) != Some(PUBLIC_PET_ID)
+        || !receipt
+            .get("destination")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| paths_match(value, destination))
+    {
+        return false;
+    }
+    let Some(files) = receipt.get("files").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    if files.len() != 2 {
+        return false;
+    }
+    let mut saw_manifest = false;
+    let mut saw_spritesheet = false;
+    for entry in files {
+        let Some(relative) = entry.get("path").and_then(serde_json::Value::as_str) else {
+            return false;
+        };
+        let already_seen = match relative {
+            "pet.json" => std::mem::replace(&mut saw_manifest, true),
+            "spritesheet.webp" => std::mem::replace(&mut saw_spritesheet, true),
+            _ => return false,
+        };
+        if already_seen {
+            return false;
+        }
+        let Ok(contents) = fs::read(destination.join(relative)) else {
+            return false;
+        };
+        let matches = entry.get("bytes").and_then(serde_json::Value::as_u64)
+            == Some(contents.len() as u64)
+            && entry.get("sha256").and_then(serde_json::Value::as_str)
+                == Some(sha256_hex(&contents).as_str());
+        if !matches {
+            return false;
+        }
+    }
+    saw_manifest && saw_spritesheet
+}
+
+fn unique_sibling(parent: &Path, label: &str) -> PathBuf {
+    parent.join(format!(
+        ".{PUBLIC_PET_ID}-{label}-{}-{}",
+        now_millis(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+fn install_public_pet(destination: &Path) -> Result<(), String> {
+    reject_link(destination, "Codex 宠物目录")?;
+    if public_pet_is_current(destination) {
+        return Ok(());
+    }
+    if destination.exists() && !owned_install_is_unmodified(destination) {
+        return Err(format!(
+            "检测到未由 Codex Pet 管理或已被修改的目录，未覆盖：{}",
+            destination.display()
+        ));
+    }
+
+    let pets_root = destination
+        .parent()
+        .ok_or_else(|| "Codex 宠物目录无效".to_owned())?;
+    reject_link(pets_root, "Codex pets 目录")?;
+    fs::create_dir_all(pets_root)
+        .map_err(|error| format!("无法创建 Codex 宠物目录 {}: {error}", pets_root.display()))?;
+    let staging = unique_sibling(pets_root, "install");
+    fs::create_dir(&staging)
+        .map_err(|error| format!("无法创建安装暂存目录 {}: {error}", staging.display()))?;
+
+    let backup = destination.exists().then(|| {
+        pets_root
+            .join(".codex-pet-backups")
+            .join(PUBLIC_PET_ID)
+            .join(now_millis().to_string())
+    });
+    let install_result = (|| -> Result<(), String> {
+        fs::write(staging.join("pet.json"), PET_MANIFEST_BYTES)
+            .map_err(|error| format!("无法暂存 pet.json: {error}"))?;
+        fs::write(staging.join("spritesheet.webp"), PET_SPRITESHEET_BYTES)
+            .map_err(|error| format!("无法暂存 spritesheet.webp: {error}"))?;
+        let files = [
+            ("pet.json", PET_MANIFEST_BYTES),
+            ("spritesheet.webp", PET_SPRITESHEET_BYTES),
+        ]
+        .map(|(path, contents)| {
+            serde_json::json!({
+                "path": path,
+                "bytes": contents.len(),
+                "sha256": sha256_hex(contents),
+            })
+        });
+        let receipt = serde_json::json!({
+            "schemaVersion": 1,
+            "owner": INSTALL_OWNER,
+            "packageVersion": env!("CARGO_PKG_VERSION"),
+            "petId": PUBLIC_PET_ID,
+            "installedAt": now_millis(),
+            "destination": path_for_config(destination),
+            "backupPath": backup.as_ref().map(|path| path_for_config(path)),
+            "files": files,
+        });
+        fs::write(
+            staging.join(INSTALL_RECEIPT),
+            serde_json::to_vec_pretty(&receipt).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| format!("无法写入安装凭据: {error}"))?;
+
+        if let Some(backup_path) = &backup {
+            let backup_root = pets_root.join(".codex-pet-backups");
+            let pet_backup_root = backup_root.join(PUBLIC_PET_ID);
+            reject_link(&backup_root, "Codex Pet 备份根目录")?;
+            reject_link(&pet_backup_root, "当前宠物备份目录")?;
+            let parent = backup_path
+                .parent()
+                .ok_or_else(|| "备份目录无效".to_owned())?;
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("无法创建备份目录 {}: {error}", parent.display()))?;
+            fs::rename(destination, backup_path)
+                .map_err(|error| format!("无法备份旧版宠物: {error}"))?;
+        }
+        if let Err(error) = fs::rename(&staging, destination) {
+            if let Some(backup_path) = &backup {
+                if let Err(rollback_error) = fs::rename(backup_path, destination) {
+                    return Err(format!(
+                        "无法启用新版宠物：{error}；旧版恢复也失败：{rollback_error}。旧版仍保留在 {}",
+                        backup_path.display()
+                    ));
+                }
+            }
+            return Err(format!("无法启用新版宠物: {error}"));
+        }
+        Ok(())
+    })();
+    if staging.exists() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    install_result
+}
+
+fn integration_status_for(executable: &Path) -> Result<CodexIntegrationStatus, String> {
+    let (home, destination, config_path) = integration_paths();
+    let document = read_config_document(&config_path)?;
+    let notify_configured = notify_matches(&document, executable);
+    Ok(CodexIntegrationStatus {
+        pet_installed: public_pet_is_current(&destination),
+        notify_configured,
+        notify_conflict: !notify_configured && document.get("notify").is_some(),
+        codex_home: home.to_string_lossy().into_owned(),
+        config_path: config_path.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+fn get_codex_integration_status() -> Result<CodexIntegrationStatus, String> {
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    integration_status_for(&executable)
+}
+
+#[tauri::command]
+fn install_codex_integration() -> Result<CodexIntegrationStatus, String> {
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let (_, destination, config_path) = integration_paths();
+    install_public_pet(&destination)?;
+    let _ = configure_notify(&config_path, &executable)?;
+    integration_status_for(&executable)
+}
+
+fn write_notify_payload(path: &Path, payload: &str, updated_at: u64) -> Result<(), String> {
+    let notification: CodexNotification = serde_json::from_str(payload)
+        .map_err(|error| format!("Invalid Codex notification: {error}"))?;
+    if notification.kind != "agent-turn-complete" {
+        return Ok(());
+    }
+    let state = PetState {
+        state: "jumping".into(),
+        updated_at,
+        source: "codex-notify".into(),
+        expires_at: Some(serde_json::Value::from(updated_at + 8_000)),
+        session_id: Some(serde_json::Value::String(normalize_session_id(
+            notification.thread_id,
+            "codex-notify",
+        ))),
+    };
+    let bytes = serde_json::to_vec_pretty(&state).map_err(|error| error.to_string())?;
+    write_state_atomically(path, &bytes).map_err(|error| error.to_string())
+}
+
+pub fn handle_notify_arguments<I>(arguments: I) -> bool
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let mut arguments = arguments.into_iter();
+    let _ = arguments.next();
+    while let Some(argument) = arguments.next() {
+        if argument == "--codex-notify" {
+            if let Some(payload) = arguments.next() {
+                let _ =
+                    write_notify_payload(&state_path(), &payload.to_string_lossy(), now_millis());
+            }
+            return true;
+        }
+    }
+    false
+}
+
 #[tauri::command]
 fn read_pet_state() -> PetState {
     fs::read_to_string(state_path())
@@ -392,6 +756,8 @@ pub fn run() {
             set_pet_state,
             get_pet_window_position,
             get_pet_movement_bounds,
+            get_codex_integration_status,
+            install_codex_integration,
             move_pet_window,
             hide_pet,
             quit_app
@@ -449,6 +815,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unique_test_directory(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "codex-pet-{label}-{}-{}",
+            std::process::id(),
+            TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
 
     #[test]
     fn state_contract_accepts_optional_source_and_text_expiration() {
@@ -572,5 +946,100 @@ mod tests {
                 max_y: -326.0,
             }
         );
+    }
+
+    #[test]
+    fn codex_notify_writes_a_short_lived_completion_state() {
+        let directory = unique_test_directory("notify");
+        let path = directory.join("state.json");
+        write_notify_payload(
+            &path,
+            r#"{"type":"agent-turn-complete","thread-id":"thread-7"}"#,
+            1_000,
+        )
+        .expect("notification should be written");
+
+        let state: PetState = serde_json::from_slice(&fs::read(&path).expect("state should exist"))
+            .expect("state should be valid JSON");
+        assert_eq!(state.state, "jumping");
+        assert_eq!(state.updated_at, 1_000);
+        assert_eq!(state.source, "codex-notify");
+        assert_eq!(state.expires_at, Some(serde_json::Value::from(9_000)));
+        assert_eq!(
+            state.session_id,
+            Some(serde_json::Value::String("thread-7".into()))
+        );
+        fs::remove_dir_all(directory).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn notify_configuration_is_idempotent_and_preserves_conflicts() {
+        let directory = unique_test_directory("notify-config");
+        fs::create_dir_all(&directory).expect("test directory should exist");
+        let config = directory.join("config.toml");
+        let executable = directory.join("Codex Pet.exe");
+
+        assert_eq!(
+            configure_notify(&config, &executable).expect("notify should be configured"),
+            (true, false)
+        );
+        let first = fs::read_to_string(&config).expect("config should exist");
+        assert!(first.contains("--codex-notify"));
+        assert_eq!(
+            configure_notify(&config, &executable).expect("configuration should be idempotent"),
+            (true, false)
+        );
+        assert_eq!(
+            fs::read_to_string(&config).expect("config should still exist"),
+            first
+        );
+
+        fs::write(&config, "model = \"gpt-test\"\nnotify = [\"other.exe\"]\n")
+            .expect("conflict fixture should be written");
+        assert_eq!(
+            configure_notify(&config, &executable).expect("conflict should be reported"),
+            (false, true)
+        );
+        assert_eq!(
+            fs::read_to_string(&config).expect("conflicting config should remain readable"),
+            "model = \"gpt-test\"\nnotify = [\"other.exe\"]\n"
+        );
+        fs::remove_dir_all(directory).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn native_pet_install_is_atomic_owned_and_tamper_aware() {
+        let directory = unique_test_directory("native-install");
+        let destination = directory.join("pets").join(PUBLIC_PET_ID);
+        install_public_pet(&destination).expect("fresh install should succeed");
+        assert!(public_pet_is_current(&destination));
+        assert!(owned_install_is_unmodified(&destination));
+
+        let receipt_path = destination.join(INSTALL_RECEIPT);
+        let original_receipt = fs::read(&receipt_path).expect("receipt should be readable");
+        let mut duplicate_receipt: serde_json::Value =
+            serde_json::from_slice(&original_receipt).expect("receipt should be valid JSON");
+        let duplicate_files = duplicate_receipt["files"]
+            .as_array_mut()
+            .expect("receipt files should be an array");
+        duplicate_files[1] = duplicate_files[0].clone();
+        fs::write(
+            &receipt_path,
+            serde_json::to_vec_pretty(&duplicate_receipt).expect("fixture should serialize"),
+        )
+        .expect("duplicate receipt should be written");
+        assert!(!owned_install_is_unmodified(&destination));
+        fs::write(&receipt_path, original_receipt).expect("original receipt should be restored");
+
+        fs::write(destination.join("pet.json"), b"modified")
+            .expect("fixture should modify installed content");
+        let error =
+            install_public_pet(&destination).expect_err("modified install must be preserved");
+        assert!(error.contains("未覆盖"));
+        assert_eq!(
+            fs::read(destination.join("pet.json")).expect("modified file should remain"),
+            b"modified"
+        );
+        fs::remove_dir_all(directory).expect("test directory should be removed");
     }
 }

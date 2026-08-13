@@ -187,6 +187,85 @@ button {
   display: none;
 }
 
+.onboarding {
+  position: fixed;
+  z-index: 30;
+  inset: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px;
+  overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 20px;
+  color: #f7fbff;
+  background: linear-gradient(145deg, rgb(22 33 64 / 98%), rgb(15 58 72 / 98%));
+  box-shadow: 0 18px 42px rgb(0 0 0 / 42%), inset 0 1px 0 rgb(255 255 255 / 8%);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+.onboarding[hidden] {
+  display: none;
+}
+
+.pet-shell[aria-hidden="true"] {
+  pointer-events: none;
+}
+
+.onboarding h2 {
+  margin: 0 0 9px;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.onboarding p {
+  margin: 0;
+  color: rgb(247 251 255 / 78%);
+  font-size: 12px;
+  line-height: 1.55;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.onboarding-path {
+  margin-top: 8px !important;
+  overflow-wrap: anywhere;
+  color: rgb(169 216 255 / 82%) !important;
+  font-size: 10px !important;
+}
+
+.onboarding-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.onboarding button {
+  min-height: 34px;
+  flex: 1;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 9px;
+  color: #f7fbff;
+  background: rgb(255 255 255 / 9%);
+  cursor: pointer;
+}
+
+.onboarding button.primary {
+  border-color: rgb(105 205 255 / 38%);
+  background: linear-gradient(135deg, #437be5, #1b9d9c);
+  font-weight: 700;
+}
+
+.onboarding button:focus-visible {
+  outline: 2px solid #9edcff;
+  outline-offset: 2px;
+}
+
+.onboarding button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .context-menu button {
   width: 100%;
   min-height: 34px;

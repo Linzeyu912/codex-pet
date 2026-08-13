@@ -31,6 +31,14 @@ export interface WindowMovementBounds {
   maxY: number;
 }
 
+export interface CodexIntegrationStatus {
+  petInstalled: boolean;
+  notifyConfigured: boolean;
+  notifyConflict: boolean;
+  codexHome: string;
+  configPath: string;
+}
+
 export async function readPetState(): Promise<PetStatePayload> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<PetStatePayload>("read_pet_state");
@@ -49,6 +57,16 @@ export async function movePetWindow(x: number, y: number): Promise<void> {
 export async function getPetMovementBounds(): Promise<WindowMovementBounds> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<WindowMovementBounds>("get_pet_movement_bounds");
+}
+
+export async function getCodexIntegrationStatus(): Promise<CodexIntegrationStatus> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<CodexIntegrationStatus>("get_codex_integration_status");
+}
+
+export async function installCodexIntegration(): Promise<CodexIntegrationStatus> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<CodexIntegrationStatus>("install_codex_integration");
 }
 
 export async function endWindowDrag(): Promise<void> {

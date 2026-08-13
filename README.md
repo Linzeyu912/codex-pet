@@ -64,6 +64,16 @@ pnpm assets:build
 
 ## 安装到 Codex
 
+普通用户首次启动 Windows 桌面版时会看到“让 Aurora 认识 Codex”引导；也可随时从右键菜单选择“连接 Codex…”。“一键连接”会：
+
+- 把公开 Aurora 图集原子安装到 `%CODEX_HOME%\pets\codex-aurora-penguin`；
+- 在用户级 `%CODEX_HOME%\config.toml` 没有 `notify` 时，写入指向当前 `Codex Pet.exe --codex-notify` 的命令；
+- 发现已有 `notify`、未知宠物目录、修改后的安装或链接路径时保留现场并提示，不静默覆盖。
+
+配置完成后重启 Codex 客户端，再到 `Settings → Pets` 选择 `custom:codex-aurora-penguin`。官方 `notify` 当前只提供 `agent-turn-complete`，因此桌面宠物会在一轮任务完成时跳跃；工作中、等待输入等状态仍可通过下文的状态文件桥接。
+
+以下命令适合源码开发、隔离测试或卸载：
+
 先只检查来源、目标与冲突，不写入文件：
 
 ```powershell
@@ -146,7 +156,7 @@ pnpm state running -- --ttl-ms 90000 --session demo-1
 - 旧格式仍兼容：非 `idle` 且缺少、无效或非正数的 `expiresAt` 时，以 `updatedAt + 15 分钟` 作为安全过期时间；缺少、空白或非字符串的 `sessionId` 归入 `legacy` 会话。
 - 标准 V2 状态为 `idle`、`running-right`、`running-left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`；桌面版另支持 `looking`、`mischief`、`lying`、`rolling`。
 
-Codex 的外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications) 当前只发送 `agent-turn-complete`，`scripts/codex-notify.mjs` 会把它映射为 `jumping`，并用官方的 `thread-id` 隔离任务会话。脚本仍兼容第三方或自定义载荷中的 `fail` / `error` 事件并映射为 `failed`，但这不是 Codex 官方 `notify` 当前提供的失败事件。它也不是完整的实时任务监听器；工作中和等待输入等阶段仍由状态文件桥接。
+Codex 的外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications) 当前只发送 `agent-turn-complete`。安装后的桌面程序通过 `Codex Pet.exe --codex-notify <JSON>` 直接接收事件，不依赖 Node.js，并把它映射为短时 `jumping` 状态；官方 `thread-id` 用于隔离任务会话。源码中的 `scripts/codex-notify.mjs` 保留给开发和第三方桥接测试，它还兼容自定义的 `fail` / `error` 事件，但这不是 Codex 官方当前提供的失败事件。`notify` 也不是完整实时任务监听器；工作中和等待输入等阶段仍由状态文件桥接。
 
 ## 验证与发布
 
@@ -156,7 +166,7 @@ Codex 的外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-adv
 pnpm verify
 ```
 
-它检查版本一致性、脚本语法、TypeScript、Web 构建、公开原创图集、无透明色边、连续性、PowerShell，并在本机可用时调用 Codex 官方图集校验器。发布前运行：
+它检查版本一致性、脚本语法、TypeScript、Web 构建、公开原创图集、无透明色边、连续性、PowerShell、Rust/Tauri 编译与单元测试，并在本机可用时调用 Codex 官方图集校验器。发布前运行：
 
 ```powershell
 pnpm release:gate
