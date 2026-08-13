@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import {
   listFilesRecursively,
@@ -140,7 +141,42 @@ if (matchingInstallers.length !== 1) {
 }
 
 const desktopBinary = path.join(projectRoot, "src-tauri", "target", profile, "codex-pet.exe");
-if (!(await pathExists(desktopBinary))) violations.push(`${profile} desktop binary is missing`);
+if (!(await pathExists(desktopBinary))) {
+  violations.push(`${profile} desktop binary is missing`);
+} else {
+  const isolatedProfile = await mkdtemp(path.join(os.tmpdir(), "codex-pet-release-e2e-"));
+  const statePath = path.join(isolatedProfile, "state.json");
+  const payload = JSON.stringify({ type: "agent-turn-complete", "thread-id": "release-e2e" });
+  const startedAt = Date.now();
+  try {
+    const result = spawnSync(desktopBinary, ["--codex-notify", payload], {
+      env: { ...process.env, CODEX_PET_STATE_PATH: statePath },
+      encoding: "utf8",
+      timeout: 10_000,
+      windowsHide: true,
+    });
+    if (result.error) {
+      violations.push(`packaged notification bridge failed to launch: ${result.error.message}`);
+    } else if (result.status !== 0) {
+      violations.push(`packaged notification bridge exited with ${result.status}: ${result.stderr.trim()}`);
+    } else if (!(await pathExists(statePath))) {
+      violations.push("packaged notification bridge did not create state.json");
+    } else {
+      const state = await readJson(statePath);
+      if (state.state !== "jumping") violations.push(`packaged notification bridge wrote state ${state.state}`);
+      if (state.source !== "codex-notify") violations.push(`packaged notification bridge wrote source ${state.source}`);
+      if (state.sessionId !== "release-e2e") violations.push("packaged notification bridge lost the thread id");
+      if (!Number.isSafeInteger(state.updatedAt) || state.updatedAt < startedAt || state.updatedAt > Date.now() + 2_000) {
+        violations.push("packaged notification bridge wrote an invalid update time");
+      }
+      if (state.expiresAt !== state.updatedAt + 8_000) {
+        violations.push("packaged notification bridge wrote an invalid expiry");
+      }
+    }
+  } finally {
+    await rm(isolatedProfile, { recursive: true, force: true });
+  }
+}
 
 if (violations.length > 0) {
   throw new Error(`PUBLIC RELEASE BLOCKED:\n  - ${violations.join("\n  - ")}`);

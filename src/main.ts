@@ -14,6 +14,16 @@ import {
   type CodexIntegrationStatus,
   type WindowPosition,
 } from "./desktop-bridge";
+import {
+  animationTickDelay,
+  easeAutoRoam,
+  nextAutoActionDelay,
+  pickAutonomousAction,
+  planAutoRoam,
+  randomBetween,
+  shouldMoveAutoWindow,
+  statePollDelay,
+} from "./runtime-policy";
 import "./style.css";
 
 type PetAction =
@@ -67,6 +77,7 @@ interface AutoRoamSession {
   target: WindowPosition;
   startedAt: number;
   duration: number;
+  lastMovedAt: number;
 }
 
 const CELL_WIDTH = 192;
@@ -219,18 +230,6 @@ const demoOrder: PetAction[] = [
   "running",
   "review",
 ];
-const autonomousActions: PetAction[] = [
-  "running-right",
-  "running-left",
-  "waving",
-  "jumping",
-  "looking",
-  "mischief",
-  "rolling",
-  "lying",
-  "idle",
-];
-
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Codex Pet root element is missing.");
 
@@ -320,7 +319,7 @@ let queuedWindowPosition: WindowPosition | null = null;
 let movingWindow = false;
 let noticeTimer = 0;
 let autoRoam = window.localStorage.getItem(AUTO_ROAM_STORAGE_KEY) !== "false";
-let nextAutoActionAt = performance.now() + 4_000;
+let nextAutoActionAt = performance.now() + nextAutoActionDelay();
 let autoRoamSession: AutoRoamSession | null = null;
 let autoRoamGeneration = 0;
 let autoRoamStopPending = false;
@@ -449,12 +448,11 @@ async function connectCodex(): Promise<void> {
   }
 }
 
-function randomBetween(minimum: number, maximum: number): number {
-  return minimum + Math.random() * Math.max(0, maximum - minimum);
-}
-
-function scheduleNextAutoAction(minimumMs = 7_000, maximumMs = 15_000): void {
-  nextAutoActionAt = performance.now() + randomBetween(minimumMs, maximumMs);
+function scheduleNextAutoAction(minimumMs?: number, maximumMs?: number): void {
+  const delay = minimumMs === undefined || maximumMs === undefined
+    ? nextAutoActionDelay()
+    : randomBetween(minimumMs, maximumMs);
+  nextAutoActionAt = performance.now() + delay;
 }
 
 function cancelAutoRoamMovement(): void {
@@ -499,32 +497,23 @@ async function startAutoRoamMovement(preferredDirection: "running-right" | "runn
       localActionKind !== null
     ) return;
 
-    const edge = 12;
-    const minX = Math.min(bounds.maxX, bounds.minX + edge);
-    const maxX = Math.max(minX, bounds.maxX - edge);
-    const roomLeft = Math.max(0, origin.x - minX);
-    const roomRight = Math.max(0, maxX - origin.x);
-    let direction = preferredDirection;
-    if (direction === "running-right" && roomRight < 48 && roomLeft > roomRight) direction = "running-left";
-    if (direction === "running-left" && roomLeft < 48 && roomRight > roomLeft) direction = "running-right";
-    const available = direction === "running-right" ? roomRight : roomLeft;
-    if (available < 24) {
+    const plan = planAutoRoam(origin, bounds, preferredDirection);
+    if (!plan) {
       scheduleNextAutoAction(3_000, 7_000);
       return;
     }
 
-    const distance = randomBetween(Math.min(72, available), Math.min(220, available));
-    const targetX = origin.x + (direction === "running-right" ? distance : -distance);
     autoRoamSession = {
       origin,
-      target: { x: Math.max(minX, Math.min(maxX, targetX)), y: origin.y },
+      target: plan.target,
       startedAt: performance.now(),
-      duration: Math.max(1_400, distance * 12),
+      duration: plan.duration,
+      lastMovedAt: Number.NEGATIVE_INFINITY,
     };
     autoRoamStopPending = false;
     localActionKind = "auto";
     localActionEndsAt = 0;
-    setAction(direction, true);
+    setAction(plan.direction, true);
   } catch {
     if (generation === autoRoamGeneration) scheduleNextAutoAction(4_000, 8_000);
   }
@@ -535,7 +524,7 @@ function startAutonomousAction(): void {
     scheduleNextAutoAction();
     return;
   }
-  const next = autonomousActions[Math.floor(Math.random() * autonomousActions.length)];
+  const next = pickAutonomousAction();
   if (next === "idle") {
     scheduleNextAutoAction(4_000, 9_000);
   } else if (next === "running-right" || next === "running-left") {
@@ -548,13 +537,14 @@ function startAutonomousAction(): void {
 function updateAutoRoam(now: number): void {
   if (!autoRoamSession) return;
   const progress = Math.min(1, Math.max(0, (now - autoRoamSession.startedAt) / autoRoamSession.duration));
-  const eased = progress < 0.5
-    ? 2 * progress * progress
-    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-  queueWindowMove({
-    x: autoRoamSession.origin.x + (autoRoamSession.target.x - autoRoamSession.origin.x) * eased,
-    y: autoRoamSession.origin.y,
-  });
+  if (shouldMoveAutoWindow(now, autoRoamSession.lastMovedAt, progress)) {
+    const eased = easeAutoRoam(progress);
+    queueWindowMove({
+      x: autoRoamSession.origin.x + (autoRoamSession.target.x - autoRoamSession.origin.x) * eased,
+      y: autoRoamSession.origin.y,
+    });
+    autoRoamSession.lastMovedAt = now;
+  }
   if (progress >= 1) {
     autoRoamSession = null;
     autoRoamStopPending = true;
@@ -631,7 +621,12 @@ function tick(now: number): void {
     advanceFrame(now);
   }
   if (now >= nextAutoActionAt && action === "idle" && localActionKind === null) startAutonomousAction();
-  const delay = reducedMotion || paused ? 200 : action === "idle" ? 80 : 24;
+  const delay = animationTickDelay({
+    hidden: document.hidden,
+    paused,
+    reducedMotion,
+    idle: action === "idle" && !autoRoamSession,
+  });
   window.setTimeout(() => requestAnimationFrame(tick), delay);
 }
 
@@ -734,7 +729,10 @@ async function pollPetState(): Promise<void> {
   } catch {
     // Web-only preview has no native state bridge.
   } finally {
-    window.setTimeout(() => void pollPetState(), remoteState === "idle" ? 1500 : 600);
+    window.setTimeout(
+      () => void pollPetState(),
+      statePollDelay({ hidden: document.hidden, idle: remoteState === "idle" }),
+    );
   }
 }
 

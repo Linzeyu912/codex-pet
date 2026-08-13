@@ -53,6 +53,7 @@ for (const filePath of await listScripts(path.join(projectRoot, "scripts"))) {
 run("Quality-gate self-tests", process.execPath, ["scripts/test-quality-gates.mjs"]);
 run("State bridge self-tests", process.execPath, ["scripts/test-state-bridge.mjs"]);
 run("Install safety self-tests", process.execPath, ["scripts/test-install-safety.mjs"]);
+run("Runtime policy self-tests", process.execPath, ["scripts/test-runtime-policy.mjs"]);
 run("TypeScript check", process.execPath, ["node_modules/typescript/bin/tsc", "--noEmit"]);
 run("Web production build", process.execPath, ["node_modules/vite/bin/vite.js", "build"]);
 run("Redistributable original mascot atlas", process.execPath, ["scripts/prepare-local-assets.mjs"]);

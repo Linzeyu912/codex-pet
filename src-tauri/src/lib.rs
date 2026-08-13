@@ -191,6 +191,9 @@ impl Default for PetState {
 }
 
 fn state_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("CODEX_PET_STATE_PATH").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path);
+    }
     let home = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)

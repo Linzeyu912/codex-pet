@@ -6,6 +6,19 @@ All notable project changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Deterministic runtime-policy tests for weighted autonomous actions, negative
+  monitor origins, edge turns, motion easing, and scheduler pacing.
+- The public release gate now launches the packaged desktop executable against
+  an isolated profile and verifies its dependency-free Codex notification state.
+
+### Changed
+
+- Automatic activity is calmer and weighted toward idle observation, while
+  animation, hidden-window polling, and automatic window moves use lower-cost
+  scheduling without reducing direct drag responsiveness.
+
 ## [0.3.0] - 2026-08-13
 
 ### Added
