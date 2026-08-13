@@ -2,7 +2,7 @@
 
 一只同时住在 Codex 和 Windows 桌面的企鹅宠物。Codex Pet 把工作、等待、完成、检查和失败等状态变成连续动画；桌面版还能左右散步、拖动、回头、背身调皮、侧躺和翻滚。
 
-当前版本：`0.2.0`。
+当前版本：`0.3.0`。
 
 > 这是独立的非官方兼容项目，不隶属于、未获腾讯或 OpenAI 赞助、认可或审核。代码采用 MIT 许可证；经典 QQ 企鹅及其像素重绘只用于个人本地实验，不提交 Git、不包含在 MIT 许可中，也不进入公共发布包。
 
@@ -174,10 +174,12 @@ pnpm release:gate
 
 `pnpm build` 是同一发布门禁的别名。发布门禁强制生成原创 Aurora 图集，执行 Rust/Tauri 编译与单元测试，构建唯一的 NSIS 桌面安装器，并检查 Git 中没有本地经典素材或未批准栅格文件。CI 使用 `pnpm verify:ci` 执行同一条正式链路。本地经典图集另须通过零警告的 V2 权威 QA 汇总、低透明度青色色边清零和完整 14 对方向盲测；盲测图由待测图集确定性生成，三位隔离评审必须逐项一致且置信度不低于 `medium`，图集、盲测图和原始 verdict 均以 SHA-256 绑定，旧汇总不能复用。生成目录和固定输出还会拒绝符号链接与 Windows junction，避免构建写出项目边界。
 
+每个安装器同时生成同名 `.sha256` 与 `.release.json`。发布门禁重新计算哈希，并核对版本、构建配置、文件大小、当前 Git commit、构建时间和工作区清洁状态；正式 Release 拒绝从脏工作区或旧 commit 生成的工件。标签 `v<package-version>` 推送后，GitHub Actions 会复跑同一门禁，并将安装器及两份校验文件一起发布。
+
 公共桌面构建始终强制使用原创 Aurora 企鹅，即使本机存在经典素材：
 
 ```text
-src-tauri\target\release\bundle\nsis\Codex Pet_0.2.0_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Codex Pet_0.3.0_x64-setup.exe
 ```
 
 `pnpm build:tauri` 和 `pnpm build:desktop` 都走同一公共构建器，不会把本地经典素材装入安装器。本地经典角色只用于 `pnpm dev` 的个人实验。

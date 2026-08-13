@@ -1,6 +1,6 @@
 [package]
 name = "codex-pet"
-version = "0.2.0"
+version = "0.3.0"
 description = "A lightweight Codex desktop pet for Windows"
 authors = ["Codex Pet contributors"]
 edition = "2021"

@@ -1,6 +1,6 @@
 # Codex Pets V2 接口契约
 
-本文记录 Codex Pet `0.2.0` 使用的 Codex 自定义宠物格式、状态桥接和本地桌面扩展。Codex 官方说明见 [Pets](https://learn.chatgpt.com/docs/pets)。
+本文记录 Codex Pet `0.3.0` 使用的 Codex 自定义宠物格式、状态桥接和本地桌面扩展。Codex 官方说明见 [Pets](https://learn.chatgpt.com/docs/pets)。
 
 ## Codex 宠物目录
 
@@ -140,6 +140,8 @@ Codex 官方外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-
 ## QA 与公开发布契约
 
 `pnpm verify` 统一检查版本、Node 脚本、TypeScript、Web 构建、公开原创 Aurora 图集、动画连续性、Rust/Tauri 编译和 Windows 支持脚本；本机存在 Codex 官方校验器时也会调用它。`pnpm release:gate` 额外执行 Rust 单元测试、生成唯一的 Tauri NSIS 安装器并检查发布政策；CI 的 `pnpm verify:ci` 执行同一正式链路。
+
+NSIS 安装器必须带有同名 `.sha256` 和 `.release.json`。元数据使用 `codex-pet-release/v1`，绑定 SemVer、构建 profile、工件名、字节数、SHA-256、Git commit、工作区清洁状态和构建时间；正式 Release 必须来自当前 clean commit。发布标签必须严格等于 `v<package.json version>`。
 
 公共 Aurora 图集使用严格几何配置：站立动作可见高度比例不超过 `1.015`，当前生成目标为 `170px`；悬停跳跃五帧必须是 idle 的精确垂直平移；方向循环必须通过眼内高光的顺时针语义检查；公开 PNG 不允许半透明边缘或透明像素残留 RGB，从源头避免底色光晕。
 

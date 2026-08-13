@@ -6,6 +6,8 @@ All notable project changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-13
+
 ### Added
 
 - Original MIT-licensed Aurora Penguin public character sources, including a
@@ -21,6 +23,8 @@ All notable project changes are recorded here. The format follows
 - Tauri 2 is now the single public desktop runtime; automatic roaming,
   explicit action controls, tray behavior, autostart, window-state persistence,
   and NSIS packaging no longer compete with a separate WPF implementation.
+- NSIS releases now include verified SHA-256 and source-freshness metadata tied
+  to the exact clean Git commit, and publish all three files together.
 - The generated public atlas now enforces uniform upright scale, exact
   translated hover-jump frames, semantic gaze direction, detached-component
   rejection, and zero partial-alpha or hidden-RGB edge pixels.

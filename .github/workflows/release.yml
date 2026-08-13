@@ -47,7 +47,10 @@ jobs:
       - name: Publish GitHub release
         shell: pwsh
         run: |
-          $files = Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*.exe'
-          if ($files.Count -ne 1) { throw "Expected one verified NSIS installer, found $($files.Count)." }
-          gh release create "${{ github.ref_name }}" @($files.FullName) `
+          $installers = @(Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*.exe')
+          if ($installers.Count -ne 1) { throw "Expected one verified NSIS installer, found $($installers.Count)." }
+          $installer = $installers[0]
+          $files = @($installer.FullName, "$($installer.FullName).sha256", "$($installer.FullName).release.json")
+          foreach ($file in $files) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing release file: $file" } }
+          gh release create "${{ github.ref_name }}" @files `
             --verify-tag --generate-notes --title "Codex Pet ${{ github.ref_name }}"

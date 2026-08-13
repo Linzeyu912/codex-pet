@@ -14,10 +14,21 @@ const cargoTomlPath = path.join(projectRoot, "src-tauri", "Cargo.toml");
 const cargoToml = await fs.readFile(cargoTomlPath, "utf8");
 const packageSection = cargoToml.match(/\[package\]([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
 const cargoVersion = packageSection.match(/^version\s*=\s*"([^"]+)"\s*$/m)?.[1];
+const cargoLock = await fs.readFile(path.join(projectRoot, "src-tauri", "Cargo.lock"), "utf8");
+const cargoLockVersion = cargoLock.match(/\[\[package\]\]\s*\nname = "codex-pet"\s*\nversion = "([^"]+)"/)?.[1];
+const readme = await fs.readFile(path.join(projectRoot, "README.md"), "utf8");
+const readmeVersion = readme.match(/当前版本：`([^`]+)`/)?.[1];
+const contract = await fs.readFile(path.join(projectRoot, "docs", "codex-pet-contract.md"), "utf8");
+const contractVersion = contract.match(/Codex Pet `([^`]+)`/)?.[1];
+const changelog = await fs.readFile(path.join(projectRoot, "CHANGELOG.md"), "utf8");
 
 const mismatches = [];
 if (tauriConfig.version !== version) mismatches.push(`src-tauri/tauri.conf.json: ${tauriConfig.version}`);
 if (cargoVersion !== version) mismatches.push(`src-tauri/Cargo.toml: ${cargoVersion ?? "missing"}`);
+if (cargoLockVersion !== version) mismatches.push(`src-tauri/Cargo.lock: ${cargoLockVersion ?? "missing"}`);
+if (readmeVersion !== version) mismatches.push(`README.md: ${readmeVersion ?? "missing"}`);
+if (contractVersion !== version) mismatches.push(`docs/codex-pet-contract.md: ${contractVersion ?? "missing"}`);
+if (!changelog.includes(`## [${version}]`)) mismatches.push(`CHANGELOG.md: missing ${version} release heading`);
 if (mismatches.length > 0) {
   throw new Error(
     `package.json is the version source (${version}), but these files differ:\n  - ${mismatches.join("\n  - ")}`,

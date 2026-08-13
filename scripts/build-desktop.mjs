@@ -19,10 +19,16 @@ function run(command, args) {
 }
 
 run(process.execPath, ["scripts/prepare-local-assets.mjs"]);
+const forwardedArguments = process.argv.slice(2);
 run(process.execPath, [
   "node_modules/@tauri-apps/cli/tauri.js",
   "build",
   "--bundles",
   "nsis",
-  ...process.argv.slice(2),
+  ...forwardedArguments,
+]);
+run(process.execPath, [
+  "scripts/write-release-metadata.mjs",
+  "--profile",
+  forwardedArguments.includes("--debug") ? "debug" : "release",
 ]);

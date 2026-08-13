@@ -46,4 +46,4 @@ jobs:
         with:
           name: codex-pet-windows-${{ github.sha }}
           if-no-files-found: error
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: src-tauri/target/release/bundle/nsis/*.exe*

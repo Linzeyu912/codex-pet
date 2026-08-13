@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   listFilesRecursively,
@@ -7,6 +7,7 @@ import {
   projectRoot,
   readJson,
   readPackage,
+  sha256File,
 } from "./lib/project-utils.mjs";
 
 const packageJson = await readPackage();
@@ -69,13 +70,61 @@ const installers = (await pathExists(bundleRoot))
   ? (await listFilesRecursively(bundleRoot)).filter((file) => file.toLowerCase().endsWith(".exe"))
   : [];
 const matchingInstallers = installers.filter((file) => path.basename(file).includes(version));
+const installerPath = matchingInstallers[0] ?? null;
 if (matchingInstallers.length !== 1) {
   violations.push(`expected exactly one versioned NSIS installer, found ${matchingInstallers.length}`);
 } else {
-  const stats = await stat(matchingInstallers[0]);
+  const stats = await stat(installerPath);
   if (stats.size < 1_000_000) violations.push(`NSIS installer is unexpectedly small: ${stats.size} bytes`);
-  if (/local-classic|qq-penguin/i.test(path.basename(matchingInstallers[0]))) {
-    violations.push(`NSIS installer name suggests local-only assets: ${path.basename(matchingInstallers[0])}`);
+  if (/local-classic|qq-penguin/i.test(path.basename(installerPath))) {
+    violations.push(`NSIS installer name suggests local-only assets: ${path.basename(installerPath)}`);
+  }
+
+  const checksumPath = `${installerPath}.sha256`;
+  const metadataPath = `${installerPath}.release.json`;
+  const actualSha256 = await sha256File(installerPath);
+  if (!(await pathExists(checksumPath))) {
+    violations.push("installer SHA-256 sidecar is missing");
+  } else {
+    const checksum = (await readFile(checksumPath, "utf8")).trim();
+    if (checksum !== `${actualSha256}  ${path.basename(installerPath)}`) {
+      violations.push("installer SHA-256 sidecar does not match the artifact");
+    }
+  }
+
+  if (!(await pathExists(metadataPath))) {
+    violations.push("installer release metadata is missing");
+  } else {
+    let metadata = null;
+    try {
+      metadata = await readJson(metadataPath);
+    } catch (error) {
+      violations.push(`installer release metadata is invalid JSON: ${error.message}`);
+    }
+    if (metadata) {
+      const currentCommit = execFileSync("git", ["-C", projectRoot, "rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      const currentDirty = Boolean(
+        execFileSync("git", ["-C", projectRoot, "status", "--porcelain", "--untracked-files=no"], {
+          encoding: "utf8",
+        }).trim(),
+      );
+      const builtAt = Date.parse(metadata.builtAt);
+      if (metadata.schema !== "codex-pet-release/v1") violations.push(`unexpected release metadata schema: ${metadata.schema}`);
+      if (metadata.version !== version) violations.push(`release metadata version is ${metadata.version}`);
+      if (metadata.profile !== profile) violations.push(`release metadata profile is ${metadata.profile}`);
+      if (metadata.artifact !== path.basename(installerPath)) violations.push("release metadata artifact name differs");
+      if (metadata.bytes !== stats.size) violations.push("release metadata artifact size differs");
+      if (metadata.sha256 !== actualSha256) violations.push("release metadata SHA-256 differs");
+      if (metadata.commit !== currentCommit) violations.push("release metadata was built from a different commit");
+      if (!Number.isFinite(builtAt) || builtAt + 5_000 < stats.mtimeMs || builtAt > Date.now() + 300_000) {
+        violations.push("release metadata build time is invalid or older than the installer");
+      }
+      if (profile === "release" && (metadata.sourceDirty !== false || currentDirty)) {
+        violations.push("formal release artifacts must be built from a clean worktree");
+      }
+    }
   }
 }
 
