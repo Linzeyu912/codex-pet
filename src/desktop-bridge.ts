@@ -24,6 +24,13 @@ export interface WindowPosition {
   y: number;
 }
 
+export interface WindowMovementBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
 export async function readPetState(): Promise<PetStatePayload> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<PetStatePayload>("read_pet_state");
@@ -37,6 +44,11 @@ export async function beginWindowDrag(): Promise<WindowPosition> {
 export async function movePetWindow(x: number, y: number): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
   await invoke("move_pet_window", { x, y });
+}
+
+export async function getPetMovementBounds(): Promise<WindowMovementBounds> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<WindowMovementBounds>("get_pet_movement_bounds");
 }
 
 export async function endWindowDrag(): Promise<void> {

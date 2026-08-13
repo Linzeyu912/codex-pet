@@ -251,6 +251,14 @@ button {
   background: rgb(255 255 255 / 14%);
 }
 
+.menu-heading {
+  padding: 8px 10px 3px;
+  color: rgb(245 248 255 / 58%);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
 .pet-shell[data-motion="reduced"] .speech-bubble {
   transition: none;
 }

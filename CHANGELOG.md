@@ -13,8 +13,11 @@ All notable project changes are recorded here. The format follows
 
 ### Changed
 
-- Clean clones, Codex installation, CI, and public portable builds now use the
+- Clean clones, Codex installation, CI, and public desktop installers now use the
   complete Aurora mascot instead of the geometric placeholder.
+- Tauri 2 is now the single public desktop runtime; automatic roaming,
+  explicit action controls, tray behavior, autostart, window-state persistence,
+  and NSIS packaging no longer compete with a separate WPF implementation.
 - The generated public atlas now enforces uniform upright scale, exact
   translated hover-jump frames, semantic gaze direction, detached-component
   rejection, and zero partial-alpha or hidden-RGB edge pixels.

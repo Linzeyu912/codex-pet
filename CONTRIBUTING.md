@@ -7,7 +7,7 @@ Windows before requesting review.
 
 1. Install the pinned dependencies with `pnpm install --frozen-lockfile`.
 2. Run `pnpm verify` for source, web, PowerShell, atlas, and continuity checks.
-3. Run `pnpm release:gate` before publishing a portable archive.
+3. Run `pnpm release:gate` before publishing a Windows installer.
 4. Use `pnpm assets:install -- --dry-run` before changing a Codex profile.
 
 `package.json` is the single source of the project version. Keep

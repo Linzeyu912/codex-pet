@@ -1,6 +1,7 @@
 import {
   beginWindowDrag,
   endWindowDrag,
+  getPetMovementBounds,
   hidePet,
   isAutostartEnabled,
   movePetWindow,
@@ -43,7 +44,7 @@ interface AnimationDefinition {
   holdFrame?: number;
 }
 
-type LocalActionKind = "demo" | "drag" | null;
+type LocalActionKind = "demo" | "drag" | "auto" | null;
 
 interface DragSession {
   generation: number;
@@ -58,6 +59,13 @@ interface DragSession {
   direction?: "running-right" | "running-left";
 }
 
+interface AutoRoamSession {
+  origin: WindowPosition;
+  target: WindowPosition;
+  startedAt: number;
+  duration: number;
+}
+
 const CELL_WIDTH = 192;
 const CELL_HEIGHT = 208;
 const ATLAS_WIDTH = 1536;
@@ -65,6 +73,7 @@ const ATLAS_HEIGHT = 2288;
 const POSE_ATLAS_WIDTH = 768;
 const POSE_ATLAS_HEIGHT = 832;
 const LEGACY_STATE_TTL_MS = 15 * 60 * 1000;
+const AUTO_ROAM_STORAGE_KEY = "codex-pet:auto-roam";
 const ATLAS_URL = new URL("./local/spritesheet.webp", window.location.href).href;
 const POSE_ATLAS_URL = new URL("./local/desktop-poses.png", window.location.href).href;
 
@@ -206,6 +215,17 @@ const demoOrder: PetAction[] = [
   "running",
   "review",
 ];
+const autonomousActions: PetAction[] = [
+  "running-right",
+  "running-left",
+  "waving",
+  "jumping",
+  "looking",
+  "mischief",
+  "rolling",
+  "lying",
+  "idle",
+];
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Codex Pet root element is missing.");
@@ -232,7 +252,15 @@ app.innerHTML = `
   </section>
   <div class="context-menu" id="pet-menu" role="menu" aria-label="宠物菜单" hidden>
     <button type="button" role="menuitemcheckbox" aria-checked="false" data-command="pause">暂停动画</button>
+    <button type="button" role="menuitemcheckbox" aria-checked="true" data-command="auto-roam">自动闲逛</button>
     <button type="button" role="menuitem" data-command="demo">换个动作</button>
+    <div class="menu-heading" role="presentation">指定动作</div>
+    <button type="button" role="menuitem" data-action="waving">挥手</button>
+    <button type="button" role="menuitem" data-action="jumping">跳一下</button>
+    <button type="button" role="menuitem" data-action="looking">四处看看</button>
+    <button type="button" role="menuitem" data-action="mischief">调皮一下</button>
+    <button type="button" role="menuitem" data-action="rolling">翻个身</button>
+    <button type="button" role="menuitem" data-action="lying">躺一会儿</button>
     <button type="button" role="menuitemcheckbox" aria-checked="false" data-command="autostart">开机自动启动</button>
     <div class="menu-separator" role="separator"></div>
     <button type="button" role="menuitem" data-command="hide">暂时隐藏</button>
@@ -245,6 +273,7 @@ const fallbackPet = app.querySelector<HTMLImageElement>(".fallback-pet")!;
 const bubbleLabel = app.querySelector<HTMLElement>(".bubble-label")!;
 const menu = app.querySelector<HTMLElement>(".context-menu")!;
 const pauseButton = app.querySelector<HTMLButtonElement>("[data-command='pause']")!;
+const autoRoamButton = app.querySelector<HTMLButtonElement>("[data-command='auto-roam']")!;
 const autostartButton = app.querySelector<HTMLButtonElement>("[data-command='autostart']")!;
 const shell = app.querySelector<HTMLElement>(".pet-shell")!;
 const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -257,7 +286,7 @@ let reducedMotion = reducedMotionQuery.matches;
 let hasAtlas = false;
 let lastFrameAt = performance.now();
 let localActionKind: LocalActionKind = null;
-let localDemoEndsAt = 0;
+let localActionEndsAt = 0;
 let dragReleasePending = false;
 let dragSession: DragSession | null = null;
 let dragGeneration = 0;
@@ -271,6 +300,11 @@ let lastRemoteStamp = 0;
 let queuedWindowPosition: WindowPosition | null = null;
 let movingWindow = false;
 let noticeTimer = 0;
+let autoRoam = window.localStorage.getItem(AUTO_ROAM_STORAGE_KEY) !== "false";
+let nextAutoActionAt = performance.now() + 4_000;
+let autoRoamSession: AutoRoamSession | null = null;
+let autoRoamGeneration = 0;
+let autoRoamStopPending = false;
 
 function frameDuration(definition: AnimationDefinition, index: number): number {
   return definition.durations[index % definition.durations.length];
@@ -319,27 +353,121 @@ function showNotice(message: string): void {
   }, 2400);
 }
 
+function randomBetween(minimum: number, maximum: number): number {
+  return minimum + Math.random() * Math.max(0, maximum - minimum);
+}
+
+function scheduleNextAutoAction(minimumMs = 7_000, maximumMs = 15_000): void {
+  nextAutoActionAt = performance.now() + randomBetween(minimumMs, maximumMs);
+}
+
+function cancelAutoRoamMovement(): void {
+  autoRoamGeneration += 1;
+  autoRoamSession = null;
+  autoRoamStopPending = false;
+}
+
 function resumeDesiredAction(): void {
+  cancelAutoRoamMovement();
   localActionKind = null;
-  localDemoEndsAt = 0;
+  localActionEndsAt = 0;
   dragReleasePending = false;
   if (remoteState !== "idle" && !remotePlaybackComplete) {
     setAction(remoteState, true);
   } else {
     setAction("idle", true);
+    scheduleNextAutoAction();
   }
 }
 
-function startLocalAction(next: PetAction): void {
-  localActionKind = "demo";
-  localDemoEndsAt = reducedMotion ? performance.now() + 1200 : 0;
+function startLocalAction(next: PetAction, kind: Exclude<LocalActionKind, "drag" | null> = "demo"): void {
+  cancelAutoRoamMovement();
+  localActionKind = kind;
+  localActionEndsAt = reducedMotion ? performance.now() + 1200 : 0;
   dragReleasePending = false;
   setAction(next, true);
 }
 
+async function startAutoRoamMovement(preferredDirection: "running-right" | "running-left"): Promise<void> {
+  const generation = ++autoRoamGeneration;
+  nextAutoActionAt = performance.now() + 60_000;
+  try {
+    const [origin, bounds] = await Promise.all([beginWindowDrag(), getPetMovementBounds()]);
+    if (
+      generation !== autoRoamGeneration ||
+      !autoRoam ||
+      paused ||
+      reducedMotion ||
+      dragSession ||
+      remoteState !== "idle" ||
+      localActionKind !== null
+    ) return;
+
+    const edge = 12;
+    const minX = Math.min(bounds.maxX, bounds.minX + edge);
+    const maxX = Math.max(minX, bounds.maxX - edge);
+    const roomLeft = Math.max(0, origin.x - minX);
+    const roomRight = Math.max(0, maxX - origin.x);
+    let direction = preferredDirection;
+    if (direction === "running-right" && roomRight < 48 && roomLeft > roomRight) direction = "running-left";
+    if (direction === "running-left" && roomLeft < 48 && roomRight > roomLeft) direction = "running-right";
+    const available = direction === "running-right" ? roomRight : roomLeft;
+    if (available < 24) {
+      scheduleNextAutoAction(3_000, 7_000);
+      return;
+    }
+
+    const distance = randomBetween(Math.min(72, available), Math.min(220, available));
+    const targetX = origin.x + (direction === "running-right" ? distance : -distance);
+    autoRoamSession = {
+      origin,
+      target: { x: Math.max(minX, Math.min(maxX, targetX)), y: origin.y },
+      startedAt: performance.now(),
+      duration: Math.max(1_400, distance * 12),
+    };
+    autoRoamStopPending = false;
+    localActionKind = "auto";
+    localActionEndsAt = 0;
+    setAction(direction, true);
+  } catch {
+    if (generation === autoRoamGeneration) scheduleNextAutoAction(4_000, 8_000);
+  }
+}
+
+function startAutonomousAction(): void {
+  if (!autoRoam || paused || reducedMotion || dragSession || remoteState !== "idle" || localActionKind !== null) {
+    scheduleNextAutoAction();
+    return;
+  }
+  const next = autonomousActions[Math.floor(Math.random() * autonomousActions.length)];
+  if (next === "idle") {
+    scheduleNextAutoAction(4_000, 9_000);
+  } else if (next === "running-right" || next === "running-left") {
+    void startAutoRoamMovement(next);
+  } else {
+    startLocalAction(next, "auto");
+  }
+}
+
+function updateAutoRoam(now: number): void {
+  if (!autoRoamSession) return;
+  const progress = Math.min(1, Math.max(0, (now - autoRoamSession.startedAt) / autoRoamSession.duration));
+  const eased = progress < 0.5
+    ? 2 * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+  queueWindowMove({
+    x: autoRoamSession.origin.x + (autoRoamSession.target.x - autoRoamSession.origin.x) * eased,
+    y: autoRoamSession.origin.y,
+  });
+  if (progress >= 1) {
+    autoRoamSession = null;
+    autoRoamStopPending = true;
+  }
+}
+
 function completeFiniteAction(): void {
   const definition = animations[action];
-  if (localActionKind === "demo") {
+  if (localActionKind === "demo" || localActionKind === "auto") {
     resumeDesiredAction();
     return;
   }
@@ -363,7 +491,11 @@ function advanceFrame(now: number): void {
     resumeDesiredAction();
     return;
   }
-  if (finishedCycle && localActionKind === "demo") {
+  if (finishedCycle && autoRoamStopPending && localActionKind === "auto") {
+    resumeDesiredAction();
+    return;
+  }
+  if (finishedCycle && (localActionKind === "demo" || localActionKind === "auto")) {
     const requiredCycles = definition.cycles ?? 1;
     if (completedCycles >= requiredCycles) {
       completeFiniteAction();
@@ -386,18 +518,23 @@ function expireRemoteStateIfNeeded(): void {
   remoteExpiresAt = 0;
   remotePlaybackComplete = false;
   if (dragSession) deferredRemoteState = true;
-  else if (localActionKind === null) setAction("idle", true);
+  else if (localActionKind === null) {
+    setAction("idle", true);
+    scheduleNextAutoAction();
+  }
 }
 
 function tick(now: number): void {
   expireRemoteStateIfNeeded();
-  if (reducedMotion && localActionKind === "demo" && localDemoEndsAt > 0 && now >= localDemoEndsAt) {
+  updateAutoRoam(now);
+  if (reducedMotion && localActionKind === "demo" && localActionEndsAt > 0 && now >= localActionEndsAt) {
     resumeDesiredAction();
   }
   const definition = animations[action];
   if (!paused && !reducedMotion && !failedHolding && now - lastFrameAt >= frameDuration(definition, frame)) {
     advanceFrame(now);
   }
+  if (now >= nextAutoActionAt && action === "idle" && localActionKind === null) startAutonomousAction();
   const delay = reducedMotion || paused ? 200 : action === "idle" ? 80 : 24;
   window.setTimeout(() => requestAnimationFrame(tick), delay);
 }
@@ -474,6 +611,7 @@ function applyRemoteState(payload: PetStatePayload): void {
 
   remoteSessionId = sessionId;
   lastRemoteStamp = updatedAt;
+  cancelAutoRoamMovement();
   remoteState = payload.state;
   remoteExpiresAt = payloadExpiry(payload);
   remotePlaybackComplete = false;
@@ -485,8 +623,13 @@ function applyRemoteState(payload: PetStatePayload): void {
 
   deferredRemoteState = false;
   localActionKind = null;
-  if (remoteState === "idle") setAction("idle", true);
-  else setAction(remoteState, true);
+  if (remoteState === "idle") {
+    setAction("idle", true);
+    scheduleNextAutoAction();
+  } else {
+    setAction(remoteState, true);
+    nextAutoActionAt = Number.POSITIVE_INFINITY;
+  }
 }
 
 async function pollPetState(): Promise<void> {
@@ -544,14 +687,31 @@ function syncMotionControl(): void {
   pauseButton.textContent = reducedMotion ? "系统已减少动画" : paused ? "继续动画" : "暂停动画";
   pauseButton.setAttribute("aria-checked", String(paused || reducedMotion));
   shell.dataset.motion = paused || reducedMotion ? "reduced" : "full";
+  autoRoamButton.disabled = reducedMotion;
+  autoRoamButton.setAttribute("aria-checked", String(autoRoam && !reducedMotion));
 }
 
 async function runCommand(command: string): Promise<void> {
   switch (command) {
     case "pause":
       paused = !paused;
+      if (paused && localActionKind === "auto") resumeDesiredAction();
+      if (!paused && autoRoam) scheduleNextAutoAction(1_000, 3_000);
       syncMotionControl();
       showNotice(paused ? "动画已暂停" : "动画已继续");
+      break;
+    case "auto-roam":
+      autoRoam = !autoRoam;
+      window.localStorage.setItem(AUTO_ROAM_STORAGE_KEY, String(autoRoam));
+      autoRoamButton.setAttribute("aria-checked", String(autoRoam));
+      if (autoRoam) {
+        scheduleNextAutoAction(600, 1_600);
+        showNotice("已开启自动闲逛");
+      } else {
+        if (localActionKind === "auto") resumeDesiredAction();
+        else cancelAutoRoamMovement();
+        showNotice("已关闭自动闲逛");
+      }
       break;
     case "demo": {
       const nextIndex = (demoOrder.indexOf(action) + 1) % demoOrder.length;
@@ -618,6 +778,8 @@ function finishDrag(pointerId?: number): void {
 
 shell.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 || event.detail > 1) return;
+  if (localActionKind === "auto") resumeDesiredAction();
+  else cancelAutoRoamMovement();
   closeMenu();
   const session: DragSession = {
     generation: ++dragGeneration,
@@ -705,8 +867,14 @@ window.addEventListener("pointerdown", (event) => {
 });
 
 menu.addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-command]");
-  if (button) void runCommand(button.dataset.command ?? "");
+  const target = (event.target as HTMLElement).closest<HTMLButtonElement>("button");
+  if (!target) return;
+  if (target.dataset.action && target.dataset.action in animations) {
+    startLocalAction(target.dataset.action as PetAction);
+    closeMenu(true);
+  } else if (target.dataset.command) {
+    void runCommand(target.dataset.command);
+  }
 });
 
 menu.addEventListener("keydown", (event) => {
@@ -739,6 +907,7 @@ window.addEventListener("resize", () => closeMenu());
 
 reducedMotionQuery.addEventListener("change", (event) => {
   reducedMotion = event.matches;
+  if (reducedMotion && localActionKind === "auto") resumeDesiredAction();
   syncMotionControl();
   if (action === "failed" && remoteState === "failed" && localActionKind === null) {
     setAction("failed", true);

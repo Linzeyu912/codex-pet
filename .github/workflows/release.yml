@@ -47,10 +47,7 @@ jobs:
       - name: Publish GitHub release
         shell: pwsh
         run: |
-          $files = Get-ChildItem release -File | Where-Object {
-            $_.Name -match '^Codex-Pet-.+-portable\.(zip|build-manifest\.json)$' -or
-            $_.Name -match '^Codex-Pet-.+-portable\.zip\.sha256$'
-          }
-          if (-not $files) { throw 'No public release files were generated.' }
+          $files = Get-ChildItem src-tauri/target/release/bundle/nsis -File -Filter '*.exe'
+          if ($files.Count -ne 1) { throw "Expected one verified NSIS installer, found $($files.Count)." }
           gh release create "${{ github.ref_name }}" @($files.FullName) `
             --verify-tag --generate-notes --title "Codex Pet ${{ github.ref_name }}"

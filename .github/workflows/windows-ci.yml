@@ -41,16 +41,9 @@ jobs:
       - name: Verify source and public release gate
         run: pnpm verify:ci
 
-      - name: Build the full Tauri NSIS bundle (best effort)
-        continue-on-error: true
-        run: pnpm build:tauri
-
-      - name: Upload public-safe portable artifact
+      - name: Upload verified Tauri installer
         uses: actions/upload-artifact@v4
         with:
-          name: codex-pet-${{ github.sha }}
+          name: codex-pet-windows-${{ github.sha }}
           if-no-files-found: error
-          path: |
-            release/Codex-Pet-*-portable.zip
-            release/Codex-Pet-*-portable.zip.sha256
-            release/Codex-Pet-*-portable.build-manifest.json
+          path: src-tauri/target/release/bundle/nsis/*.exe

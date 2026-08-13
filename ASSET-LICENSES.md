@@ -23,10 +23,10 @@ developer may supply a classic red-scarf penguin reference for private
 experimentation, but this project does not grant a license to copy, publish,
 sell, or redistribute that reference or a derivative of it.
 
-The public build pipeline always selects the redistributable original Aurora
-Penguin. A local-classic portable build requires the explicit
-`-IncludeLocalClassicAssets` switch, is rejected in CI, and receives a
-`LOCAL-ONLY-NOT-FOR-REDISTRIBUTION.txt` notice.
+The public desktop build pipeline always selects the redistributable original
+Aurora Penguin. Local classic material may appear during an explicit local
+development run, but the Tauri installer builder and CI force the public
+mascot and never package local classic assets.
 
 QQ and related penguin characters, names, logos, and trademarks may be owned
 by Tencent or other rights holders. They are not licensed by this repository.

@@ -87,13 +87,13 @@ public/local/desktop-poses.png
 - 单格：`192 × 208`
 - 16 格均为非空姿态，并使用统一尺度和脚底基线
 
-姿态来源是被 Git 忽略的 `.local-assets/qq-penguin/poses/pose-sheet-v1.png`：第 1 行左侧步态，第 2 行右侧步态，第 3 行背面/回头/过渡，第 4 行侧躺/仰躺/翻滚/恢复。WPF 与 Tauri 在检测到该图集时，用它编排：
+姿态来源是被 Git 忽略的 `.local-assets/qq-penguin/poses/pose-sheet-v1.png`：第 1 行左侧步态，第 2 行右侧步态，第 3 行背面/回头/过渡，第 4 行侧躺/仰躺/翻滚/恢复。Tauri 在检测到该图集时，用它编排：
 
 - `mischief`：正面 → 回头 → 背身调皮 → 转回正面
 - `lying`：正面 → 下蹲/转身 → 侧躺/仰躺 → 坐起 → 正面
 - `rolling`：正面 → 侧倒 → 翻身 → 恢复坐姿 → 正面
 
-没有 `desktop-poses.png` 时，这三种桌面动作退回 V2 `failed` 行的兼容序列。该扩展不会复制到 Codex 的宠物目录；公共便携构建也不会包含经典本地图集。
+没有 `desktop-poses.png` 时，这三种桌面动作退回 V2 `failed` 行的兼容序列。该扩展不会复制到 Codex 的宠物目录；公共 Tauri 安装器也不会包含经典本地图集。
 
 ## 状态文件协议
 
@@ -137,7 +137,7 @@ Codex 官方外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-
 
 ## QA 与公开发布契约
 
-`pnpm verify` 统一检查版本、Node 脚本、TypeScript、Web 构建、公开原创 Aurora 图集、动画连续性和 PowerShell；本机存在 Codex 官方校验器时也会调用它。`pnpm release:gate` 额外执行所有桌面动作 smoke、生成公共便携包并检查发布政策；CI 的 `pnpm verify:ci` 还必须通过 Rust/Tauri 编译与单元测试。
+`pnpm verify` 统一检查版本、Node 脚本、TypeScript、Web 构建、公开原创 Aurora 图集、动画连续性、Rust/Tauri 编译和 Windows 支持脚本；本机存在 Codex 官方校验器时也会调用它。`pnpm release:gate` 额外执行 Rust 单元测试、生成唯一的 Tauri NSIS 安装器并检查发布政策；CI 的 `pnpm verify:ci` 执行同一正式链路。
 
 公共 Aurora 图集使用严格几何配置：站立动作可见高度比例不超过 `1.015`，当前生成目标为 `170px`；悬停跳跃五帧必须是 idle 的精确垂直平移；方向循环必须通过眼内高光的顺时针语义检查；公开 PNG 不允许半透明边缘或透明像素残留 RGB，从源头避免底色光晕。
 
@@ -150,4 +150,4 @@ Codex 官方外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-
 - `local-classic` 包或非 `codex-aurora-penguin` 的公共 manifest
 - 版本、构建 manifest 或 SHA-256 sidecar 不一致
 
-显式的 `pnpm build:portable:local-classic` 仅供个人本地实验，在 CI 中被拒绝，产物带有不可再分发警告。
+`pnpm build:tauri` 与 `pnpm build:desktop` 都强制选择公开 Aurora 素材；经典本地素材仅可通过 `pnpm dev` 用于个人实验，不存在可误传的经典素材安装器命令。

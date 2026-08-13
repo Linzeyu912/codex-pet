@@ -112,11 +112,44 @@ struct PetState {
     session_id: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowPosition {
     x: f64,
     y: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowMovementBounds {
+    min_x: f64,
+    min_y: f64,
+    max_x: f64,
+    max_y: f64,
+}
+
+fn logical_movement_bounds(
+    work_x: i32,
+    work_y: i32,
+    work_width: u32,
+    work_height: u32,
+    window_width: u32,
+    window_height: u32,
+    scale_factor: f64,
+) -> WindowMovementBounds {
+    let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
+    let min_x = f64::from(work_x) / scale;
+    let min_y = f64::from(work_y) / scale;
+    WindowMovementBounds {
+        min_x,
+        min_y,
+        max_x: min_x + f64::from(work_width.saturating_sub(window_width)) / scale,
+        max_y: min_y + f64::from(work_height.saturating_sub(window_height)) / scale,
+    }
 }
 
 impl Default for PetState {
@@ -305,6 +338,25 @@ fn get_pet_window_position(window: tauri::WebviewWindow) -> Result<WindowPositio
 }
 
 #[tauri::command]
+fn get_pet_movement_bounds(window: tauri::WebviewWindow) -> Result<WindowMovementBounds, String> {
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "The pet window is not attached to a monitor.".to_owned())?;
+    let work_area = monitor.work_area();
+    let window_size = window.outer_size().map_err(|error| error.to_string())?;
+    Ok(logical_movement_bounds(
+        work_area.position.x,
+        work_area.position.y,
+        work_area.size.width,
+        work_area.size.height,
+        window_size.width,
+        window_size.height,
+        monitor.scale_factor(),
+    ))
+}
+
+#[tauri::command]
 fn move_pet_window(window: tauri::WebviewWindow, x: f64, y: f64) -> Result<(), String> {
     window
         .set_position(tauri::LogicalPosition::new(x, y))
@@ -339,6 +391,7 @@ pub fn run() {
             read_pet_state,
             set_pet_state,
             get_pet_window_position,
+            get_pet_movement_bounds,
             move_pet_window,
             hide_pet,
             quit_app
@@ -497,5 +550,27 @@ mod tests {
 
         assert_eq!(fs::read(&path).expect("state should be readable"), b"new");
         fs::remove_dir_all(directory).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn movement_bounds_use_monitor_work_area_and_support_negative_origins() {
+        assert_eq!(
+            logical_movement_bounds(-1920, 0, 1920, 1040, 260, 286, 1.0),
+            WindowMovementBounds {
+                min_x: -1920.0,
+                min_y: 0.0,
+                max_x: -260.0,
+                max_y: 754.0,
+            }
+        );
+        assert_eq!(
+            logical_movement_bounds(0, -2160, 3840, 2080, 520, 572, 2.0),
+            WindowMovementBounds {
+                min_x: 0.0,
+                min_y: -1080.0,
+                max_x: 1660.0,
+                max_y: -326.0,
+            }
+        );
     }
 }

@@ -6,7 +6,7 @@ import { projectRoot } from "./lib/project-utils.mjs";
 const argumentsSet = new Set(process.argv.slice(2));
 const release = argumentsSet.has("--release");
 const ci = argumentsSet.has("--ci") || process.env.CI === "true";
-const withTauri = argumentsSet.has("--with-tauri") || ci;
+const withTauri = true;
 const powershell = process.platform === "win32" ? "powershell.exe" : "pwsh";
 const safeEnvironment = { ...process.env, CODEX_PET_FORCE_PUBLIC_MASCOT: "1" };
 
@@ -66,33 +66,6 @@ if (process.platform === "win32") {
     "scripts/Try-ValidateCodexAtlas.ps1",
   ]);
 
-  if (release && !ci) {
-    const actions = [
-      "idle",
-      "running-right",
-      "running-left",
-      "waving",
-      "jumping",
-      "failed",
-      "waiting",
-      "running",
-      "review",
-      "looking",
-      "rolling",
-      "lying",
-      "mischief",
-    ];
-    for (const action of actions) {
-      run(`WPF smoke: ${action}`, powershell, [
-        "-NoProfile",
-        "-File",
-        "windows/CodexPet.ps1",
-        "-Smoke",
-        "-SmokeAction",
-        action,
-      ], { timeout: 30_000 });
-    }
-  }
 }
 
 if (withTauri) {
@@ -114,8 +87,8 @@ if (withTauri) {
 }
 
 if (release) {
-  if (process.platform !== "win32") throw new Error("Portable public release builds require Windows.");
-  run("Public-safe portable package", powershell, ["-NoProfile", "-File", "windows/Build-Portable.ps1"]);
+  if (process.platform !== "win32") throw new Error("Public NSIS release builds require Windows.");
+  run("Tauri NSIS installer", process.execPath, ["scripts/build-desktop.mjs"], { timeout: 30 * 60 * 1000 });
   run("Public release policy", process.execPath, ["scripts/check-public-release.mjs"]);
 }
 

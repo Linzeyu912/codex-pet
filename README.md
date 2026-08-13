@@ -6,10 +6,10 @@
 
 > 这是独立的非官方兼容项目，不隶属于、未获腾讯或 OpenAI 赞助、认可或审核。代码采用 MIT 许可证；经典 QQ 企鹅及其像素重绘只用于个人本地实验，不提交 Git、不包含在 MIT 许可中，也不进入公共发布包。
 
-## 两套运行形态
+## 两种使用方式
 
 - **Codex 自定义宠物**：遵循 Codex Pets V2 的 `8 × 11` 图集契约，安装后可在 `Settings → Pets` 中选择。
-- **Windows 桌面宠物**：透明置顶、可拖动，支持托盘、位置记忆、开机启动、自动巡游、状态桥接和动作菜单。当前可直接运行的外壳为 PowerShell/WPF；仓库也包含 Tauri 2 前端与原生壳。
+- **Windows 桌面宠物**：以 Tauri 2 作为唯一公开桌面运行时，透明置顶、可拖动，支持单实例、托盘、位置记忆、开机启动、自动巡游、状态桥接和动作菜单。
 
 Codex 官方说明：[Pets](https://learn.chatgpt.com/docs/pets)。仓库中的详细兼容契约见 [docs/codex-pet-contract.md](docs/codex-pet-contract.md)。
 
@@ -26,7 +26,7 @@ pnpm assets:prepare
 pnpm dev
 ```
 
-环境要求：Windows 10/11、Node.js 20.19+ 或 22.12+、pnpm 11+；推荐 Node.js 24。也可双击 `windows\Start-CodexPet.cmd` 启动。启动诊断日志保存在 `%LOCALAPPDATA%\Codex Pet\logs`。
+开发环境要求：Windows 10/11、WebView2、Node.js 20.19+ 或 22.12+、pnpm 11+ 和稳定版 Rust；推荐 Node.js 24。`pnpm dev` 会准备图集并启动 Tauri 桌面应用。普通用户使用 NSIS 安装器，不需要 Node.js、pnpm 或 Rust。
 
 干净克隆会直接使用项目原创、可公开分发的 Aurora 企鹅；不需要额外角色素材即可获得完整图集和动作。
 
@@ -54,7 +54,7 @@ pnpm dev
 .local-assets\qq-penguin\poses\pose-sheet-v1.png
 ```
 
-四行依次表达左侧步态、右侧步态、背面/回头姿态，以及侧躺/翻滚/恢复姿态。生成器会把 16 个姿态统一为 `192 × 208` 单元，并在本地生成 `desktop-poses.png`。它只扩展 WPF/Tauri 桌面动作，不改变 Codex Pets V2 的 11 行契约；缺少姿态表时，桌面端会退回 V2 图集内的兼容动作。
+四行依次表达左侧步态、右侧步态、背面/回头姿态，以及侧躺/翻滚/恢复姿态。生成器会把 16 个姿态统一为 `192 × 208` 单元，并在本地生成 `desktop-poses.png`。它只扩展 Tauri 桌面动作，不改变 Codex Pets V2 的 11 行契约；缺少姿态表时，桌面端会退回 V2 图集内的兼容动作。
 
 ```powershell
 pnpm assets:build
@@ -162,29 +162,22 @@ pnpm verify
 pnpm release:gate
 ```
 
-`pnpm build` 是同一发布门禁的别名。发布门禁还会逐动作执行 WPF smoke、清理旧版或未验证的生成物、创建便携包、验证清单与 SHA-256，并检查 Git 中没有本地经典素材。CI 使用 `pnpm verify:ci`，还要求 Rust/Tauri 编译检查与单元测试通过。本地经典图集另须通过零警告的 V2 权威 QA 汇总、低透明度青色色边清零和完整 14 对方向盲测；盲测图由待测图集确定性生成，三位隔离评审必须逐项一致且置信度不低于 `medium`，图集、盲测图和原始 verdict 均以 SHA-256 绑定，旧汇总不能复用。生成目录和固定输出还会拒绝符号链接与 Windows junction，避免构建写出项目边界。
+`pnpm build` 是同一发布门禁的别名。发布门禁强制生成原创 Aurora 图集，执行 Rust/Tauri 编译与单元测试，构建唯一的 NSIS 桌面安装器，并检查 Git 中没有本地经典素材或未批准栅格文件。CI 使用 `pnpm verify:ci` 执行同一条正式链路。本地经典图集另须通过零警告的 V2 权威 QA 汇总、低透明度青色色边清零和完整 14 对方向盲测；盲测图由待测图集确定性生成，三位隔离评审必须逐项一致且置信度不低于 `medium`，图集、盲测图和原始 verdict 均以 SHA-256 绑定，旧汇总不能复用。生成目录和固定输出还会拒绝符号链接与 Windows junction，避免构建写出项目边界。
 
-公共构建始终强制使用原创 Aurora 企鹅，即使本机存在经典素材：
+公共桌面构建始终强制使用原创 Aurora 企鹅，即使本机存在经典素材：
 
 ```text
-release\CodexPet-0.2.0-public-aurora\
-release\Codex-Pet-0.2.0-portable.zip
-release\Codex-Pet-0.2.0-portable.zip.sha256
-release\Codex-Pet-0.2.0-portable.build-manifest.json
+src-tauri\target\release\bundle\nsis\Codex Pet_0.2.0_x64-setup.exe
 ```
 
-只有明确执行下列命令，才会生成带本地经典素材、不可分发的便携包；该模式在 CI 和公共发布流程中会被拒绝：
-
-```powershell
-pnpm build:portable:local-classic
-```
+`pnpm build:tauri` 和 `pnpm build:desktop` 都走同一公共构建器，不会把本地经典素材装入安装器。本地经典角色只用于 `pnpm dev` 的个人实验。
 
 ## 项目结构
 
 ```text
 src/                    Tauri/Web 前端状态机
 src-tauri/              Tauri 2 原生桌面壳
-windows/                PowerShell/WPF 桌面壳与便携构建
+windows/                Windows 图集验证支持脚本
 scripts/                图集、QA、安装、发布和状态桥接
 docs/                   角色与接口说明
 public/aurora-penguin*.png  MIT 许可的原创公共角色源图
