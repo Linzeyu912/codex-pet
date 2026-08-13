@@ -6,6 +6,8 @@ All notable project changes are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-13
+
 ### Added
 
 - Deterministic runtime-policy tests for weighted autonomous actions, negative

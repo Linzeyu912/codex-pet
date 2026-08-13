@@ -2,7 +2,7 @@
 
 一只同时住在 Codex 和 Windows 桌面的企鹅宠物。Codex Pet 把工作、等待、完成、检查和失败等状态变成连续动画；桌面版还能左右散步、拖动、回头、背身调皮、侧躺和翻滚。
 
-当前版本：`0.3.0`。
+当前版本：`0.3.1`。
 
 > 这是独立的非官方兼容项目，不隶属于、未获腾讯或 OpenAI 赞助、认可或审核。代码采用 MIT 许可证；经典 QQ 企鹅及其像素重绘只用于个人本地实验，不提交 Git、不包含在 MIT 许可中，也不进入公共发布包。
 
@@ -179,7 +179,7 @@ pnpm release:gate
 公共桌面构建始终强制使用原创 Aurora 企鹅，即使本机存在经典素材：
 
 ```text
-src-tauri\target\release\bundle\nsis\Codex Pet_0.3.0_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Codex Pet_0.3.1_x64-setup.exe
 ```
 
 `pnpm build:tauri` 和 `pnpm build:desktop` 都走同一公共构建器，不会把本地经典素材装入安装器。本地经典角色只用于 `pnpm dev` 的个人实验。

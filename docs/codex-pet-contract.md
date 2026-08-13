@@ -1,6 +1,6 @@
 # Codex Pets V2 接口契约
 
-本文记录 Codex Pet `0.3.0` 使用的 Codex 自定义宠物格式、状态桥接和本地桌面扩展。Codex 官方说明见 [Pets](https://learn.chatgpt.com/docs/pets)。
+本文记录 Codex Pet `0.3.1` 使用的 Codex 自定义宠物格式、状态桥接和本地桌面扩展。Codex 官方说明见 [Pets](https://learn.chatgpt.com/docs/pets)。
 
 ## Codex 宠物目录
 
