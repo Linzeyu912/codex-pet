@@ -51,6 +51,8 @@ try {
 const forbiddenTrackedPrefixes = [".local-assets/", "public/local/", "release/", "src-tauri/target/"];
 const approvedPublicRasters = new Set([
   "public/qq-penguin-source.png",
+  "docs/images/qq-penguin.png",
+  "docs/images/qq-penguin-poses.png",
 ]);
 for (const file of trackedFiles) {
   if (forbiddenTrackedPrefixes.some((prefix) => file.startsWith(prefix))) {
