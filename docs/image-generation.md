@@ -1,34 +1,19 @@
 # 图像生成记录
 
-工具：内置 image_gen。没有指定或声称使用 image2.5。
+工具：内置 image_gen。
 
-最终源图：`public/qq-penguin-source.png`。其余生成草稿保存在本机 `.local-assets/`，不作为运行时来源。
+最终源图：`public/qq-penguin-source.png`。运行时使用构建脚本生成的透明图集，桌面版与 Codex 内置版共用同一来源。
 
-流程：正面参考 → 同一角色 4×4 姿态表 → 背景色键修正 → 侧面体型修正 → 挥手/倾倒过渡 → 单一正面围巾尾端修正。
+## 当前角色与动画约束
 
-## 最终围巾修正提示词
+- 黑白企鹅，橙色嘴脚，红围巾，像素风格。
+- 围巾只有一个下垂尾端，固定在自身左侧；正面与左行可见，右行与背面被遮挡。
+- 4×4 姿态表包含左右行走、正面、背面、挥手、侧躺与恢复姿态。
+- 固定镜头与身体比例，构建时所有姿态使用同一缩放系数，并对齐脚底基线。
+- 源图使用绿色色键背景，构建时去除；最终 PNG 与 WebP 保留透明通道。
 
-EDIT TARGET: latest 4x4 pixel-art QQ penguin sheet on green. Correct scarf topology ONLY. Strict user character rule: ONE SINGLE SHORT DANGLING SCARF TAB on FRONT of neck at viewer-right chest, only visible when the front chest faces the camera. NO hanging tab at either side profile, NO hanging tab anywhere on back. Rows1 and2 (8 side-profile walking sprites): remove ALL downward hanging red scarf tabs; replace each removed tab with the original black wing/body or white belly appropriate to that location. Keep only a narrow red NECK RING. Row3 columns3 and4 (both back views): remove ALL downward dangling tabs; keep ONLY a smooth horizontal red neck ring, black body underneath. Row3 columns1/2 are front-facing: retain exactly ONE short red tab on viewer-right upper chest; no second tail, no knot at back. Row4: retain at most one FRONT chest tab when chest is visible, never a back or side tail. Preserve every character pose, pixel style, black-white-orange colors, dimensions, head size, gait, wave, placement and regular 4x4 layout. Pure solid GREEN #00FF00 background. Do not redesign. NO text, no grid, no shadows.
+## 最后一次围巾遮挡修正提示词
 
-## 初始姿态提示词
+以下为内置图像工具最后一次编辑使用的提示词，描述对左行四帧的局部调整。当前设定以以上约束及源图为准。
 
-Use case: identity-preserve. Input image 1 is the exact canonical character reference. Create one animation keyframe spritesheet of THIS SAME nostalgic classic QQ penguin, black and white, orange beak and feet, RED scarf. 4 columns by 4 rows, precisely regular equal square cells, overall square image, real transparent background, NO grid lines, NO numbers/text/shadows. Every cell contains exactly one full-body penguin. Fixed orthographic camera and physical scale in ALL SIXTEEN cells; constant head diameter and body proportions. Upright penguin height exactly 76% of cell height, feet on baseline 88% of cell height, centered axis 50%. Same head size and belly mass in side, back and lying views; profile may narrow naturally but must NOT shrink in height. Resting lying penguin retains physical body length of standing penguin height. Do not auto-fit each pose. Keep generous margin. Same clean pixel art style and palette as reference. Row 1: four walking keyframes facing LEFT, true left profile with beak at image left, legs alternate subtly, head absolutely level and constant size, no squash/stretch. Row 2: four walking keyframes facing RIGHT, true right profile, same gait and scale, scarf obeys occlusion. Row 3: [front three-quarter looking slightly left (45deg), EXACT FRONT upright matching reference, back three-quarter (135deg), EXACT BACK upright (180deg)] progressively rotate the same rigid body around vertical axis without zoom. Row 4: [leaning 30deg toward falling left, lying on left side head image left, lying on back feet image right, sitting up to recover]. All poses one coherent character at the SAME camera distance. Scarf placement stays on character left (viewer right in front) and wraps logically around neck. No blue/teal, no hair tuft, no accessories, no grass, no background. Preserve original black head, tall white eye ovals, short large orange smiling beak, white belly, red scarf, orange feet.
-
-## 比例修正提示词
-
-Edit this exact 4x4 red scarf penguin sprite sheet on green. Critical animation correction: ALL upright poses in rows 1, 2 and 3 must have IDENTICAL visible height and same head size. Current side walking poses rows1/2 are TOO SHORT in the torso below the scarf. Keep their head and beak absolutely unchanged in size. Extend ONLY their torso/belly below the scarf downwards by about 8 percent of the full penguin height, then place feet at the same relative cell baseline as row3. This makes side walking penguins as tall as front/back penguins, without enlarging the heads. Keep each row in its 4x4 equal cell layout with at least 20 pixels margins. Row3 front/back already correct, preserve them. Preserve row4 lying poses. In right-facing row2 hide the hanging red scarf end on the far side: only show neck wrap, because scarf tail is on the penguin's left. Pure uniform chroma GREEN #00FF00 background. Keep crisp pixel art and black-white-orange-red palette, no grid, no text, no shadow. Identical physical head diameter, torso height, full standing height across all camera angles; fixed orthographic view.
-
-## 挥手和过渡提示词
-
-Edit the last green 4x4 penguin sheet. Preserve all twelve walking/front/back penguins except row3 column1. Change row3 column1 into a friendly WAVE: same front penguin, one flipper raised alongside its head and continuously attached to shoulder, same head and torso size, same foot baseline as row3 column2. Keep row3 column2 neutral front, col3 three-quarter back, col4 exact back. Change ONLY row4 column1 to a halfway-fallen pose tilted 60 degrees counterclockwise from upright (head leaning far LEFT, feet toward RIGHT), a natural in-between for upright to fully lying. Same physical scale and body proportions, no resizing to fit. All other 14 cells unchanged. Solid chroma green #00FF00, 4 columns x4 rows equal cell grid, no labels, no shadows, no checkerboard, crisp pixel art black-white-orange-red classic QQ penguin.
-
-## 基准角色提示词
-
-Use case: stylized-concept. Asset type: transparent pixel art desktop pet canonical reference. Create the classic nostalgic QQ penguin associated with QQ Farm: plump smooth black head and body, white oval face and belly, two tall white eyes with black pupils, small golden orange beak, orange webbed feet, vivid RED scarf around neck with a short hanging end on character's left (viewer right). Full body standing straight, front view, both flippers relaxed, calm friendly smile. Faithful classic black-white-red QQ mascot silhouette, NO blue body, no teal, no tuft, no star pin, no clothes except red scarf. Clean charming 2D pixel game sprite with crisp consistent pixel grid and restrained shading. Orthographic straight-on camera, no perspective foreshortening. Entire character visible, centered, neutral symmetric stance, level feet. Transparent background with real alpha, no ground plane, no shadow, no labels, no text, no watermark. Character occupies 75 percent of canvas height, plenty of transparent margins. This canonical reference will be used to keep head size, belly volume, eye proportions, scarf and body mass identical during rotation.
-
-## 最新修正：固定侧围巾遮挡（覆盖此前正面限定规则）
-
-工具：内置 image_gen。左行四帧可见自身左侧的同一个围巾尾端；右行和背面遮挡。最新源图仍为 `public/qq-penguin-source.png`。
-
-Edit target: this exact 4x4 pixel sprite sheet. Change ONLY the four LEFT-FACING walking penguins in the FIRST ROW: restore one short RED hanging scarf end on the near-side upper chest, attached to the existing red neck ring, hanging down along the boundary between white chest and near black wing. The scarf end belongs to the character's anatomical LEFT side (viewer right in front view), hence visible in LEFT-facing profile. Consistent same short rectangular tab in all 4 first-row frames; end around 68-70% of character full height. It should match the front-view tab in row3 col2, with slight pixel shading and tiny gait motion. Rows2,3,4 must stay exactly unchanged: RIGHT-facing walking penguins must keep NO hanging scarf end, back views NO end, front views one existing end. Preserve every character outline, head/body proportions, posture, feet, position, 4x4 cell grid, canvas dimensions, all colors outside new scarf tabs. No resizing, no zoom, no re-centering. Keep solid green chroma background. No text or shadows. This is an occlusion correction for ONE physical scarf tab, not adding a second scarf.
-
+Edit target: this exact 4x4 pixel sprite sheet.Change ONLY the four LEFT-FACING walking penguins in the FIRST ROW: restore one short RED hanging scarf end on the near-side upper chest, attached to the existing red neck ring, hanging down along the boundary between white chest and near black wing. The scarf end belongs to the character's anatomical LEFT side (viewer right in front view), hence visible in LEFT-facing profile. Consistent same short rectangular tab in all 4 first-row frames; end around 68-70% of character full height. It should match the front-view tab in row3 col2, with slight pixel shading and tiny gait motion. Rows2,3,4 must stay exactly unchanged: RIGHT-facing walking penguins must keep NO hanging scarf end, back views NO end, front views one existing end. Preserve every character outline, head/body proportions, posture, feet, position, 4x4 cell grid, canvas dimensions, all colors outside new scarf tabs. No resizing, no zoom, no re-centering. Keep solid green chroma background. No text or shadows. This is an occlusion correction for ONE physical scarf tab, not adding a second scarf.

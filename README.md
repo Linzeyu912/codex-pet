@@ -15,6 +15,15 @@
 
 两版本共用角色源图和缩放系数，跨图集的同一姿态逐像素一致。
 
+## 下载
+
+在 [GitHub Releases](https://github.com/Linzeyu912/codex-pet/releases/latest) 下载当前正式版本：
+
+- Windows 桌面版：下载 `.exe` 安装包运行安装。
+- Codex 内置版：解压 `qq-penguin-codex-v2.zip`，将其中的 `qq-penguin` 文件夹放入 `%USERPROFILE%\.codex\pets\`；自定义 `CODEX_HOME` 时放入该目录下的 `pets` 文件夹。
+
+两种版本可以同时使用。
+
 ## 开发与运行
 
 需要 Node.js 22.12+、pnpm 11、Python 3 与 Pillow（用于保留 WebP 透明像素）；桌面版另需 Rust、Windows C++ 构建工具和 WebView2。
