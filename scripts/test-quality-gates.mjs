@@ -36,10 +36,6 @@ import {
   removeBlueHaloRgba,
   removeChromaFringeRgba,
 } from "./remove-chroma-fringe.mjs";
-import {
-  auditDirectionalScarf,
-  deleteRunningLeftScarfPanel,
-} from "./build-local-assets.mjs";
 
 assert.deepEqual(
   {
@@ -214,41 +210,7 @@ assert.deepEqual(
   "intended navy outline should remain byte-for-byte unchanged",
 );
 
-const scarfFixtureWidth = 192 * 8;
-const scarfFixtureHeight = 208 * 3;
-const scarfFixture = Buffer.alloc(scarfFixtureWidth * scarfFixtureHeight * 4);
-const paintScarfFixtureRect = (row, column, left, top, width, height, color) => {
-  for (let y = top; y < top + height; y += 1) {
-    for (let x = left; x < left + width; x += 1) {
-      const offset = (((row * 208 + y) * scarfFixtureWidth) + column * 192 + x) * 4;
-      scarfFixture.set(color, offset);
-    }
-  }
-};
-for (let column = 0; column < 8; column += 1) {
-  for (const row of [1, 2]) {
-    paintScarfFixtureRect(row, column, 20, 80, 145, 101, [15, 18, 42, 255]);
-    paintScarfFixtureRect(row, column, 24, 118, 54, 55, [255, 255, 255, 255]);
-    paintScarfFixtureRect(row, column, 20, 90, 145, 20, [235, 24, 32, 255]);
-  }
-  paintScarfFixtureRect(1, column, 78, 111, 30, 42, [235, 24, 32, 255]);
-  paintScarfFixtureRect(2, column, 78, 111, 30, 42, [235, 24, 32, 255]);
-  paintScarfFixtureRect(2, column, 145, 155, 30, 10, [235, 24, 32, 255]);
-}
-const repairedScarfFixture = deleteRunningLeftScarfPanel(scarfFixture, scarfFixtureWidth);
-assert.equal(repairedScarfFixture.opaqueDeletedPixels, 0, "the duplicate scarf layer must be cleared first");
-assert.equal(repairedScarfFixture.transparentDeletedPixels, 0, "body restoration must not leave holes");
-assert.equal(repairedScarfFixture.whiteReplacementPixels, 0, "hidden scarf pixels must never become white");
-const scarfFixtureAudit = auditDirectionalScarf(repairedScarfFixture.data, scarfFixtureWidth);
-assert.equal(scarfFixtureAudit.maxHiddenPanelPixels, 0, "running-left must not retain the duplicate panel");
-assert.ok(scarfFixtureAudit.minVisiblePanelPixels >= 400, "running-right must retain its visible panel");
-const fixturePixel = (row, column, x, y) => {
-  const offset = (((row * 208 + y) * scarfFixtureWidth) + column * 192 + x) * 4;
-  return [...repairedScarfFixture.data.subarray(offset, offset + 4)];
-};
-assert.deepEqual(fixturePixel(2, 0, 90, 130), [15, 18, 42, 255], "deleted panel must reveal navy body");
-assert.deepEqual(fixturePixel(1, 0, 90, 130), [235, 24, 32, 255], "running-right panel must remain red");
-assert.deepEqual(fixturePixel(2, 0, 150, 158), [235, 24, 32, 255], "rear scarf tail must remain red");
+// Current single-front-tab regressions live in test-character.mjs.
 
 async function writePoseFixture(filePath, {
   width = 768,
@@ -574,11 +536,11 @@ try {
   const generatedLocalRoot = path.join(
     generatedProject,
     ".local-assets",
-    "public-mascot",
+    "qq-penguin",
     "codex-pet",
   );
   const generatedPublicRoot = path.join(generatedProject, "public", "local");
-  await fs.mkdir(path.join(generatedProject, ".local-assets", "public-mascot"), { recursive: true });
+  await fs.mkdir(path.join(generatedProject, ".local-assets", "qq-penguin"), { recursive: true });
   await fs.mkdir(path.join(generatedProject, "public"), { recursive: true });
   const generatedNames = ["spritesheet.webp", "spritesheet.png", "pet.json", "desktop-poses.png"];
   let generatedLocalPlan = await preflightSafeOutputTree({
@@ -658,7 +620,7 @@ try {
   const targetAttackLocalRoot = path.join(
     targetAttackProject,
     ".local-assets",
-    "public-mascot",
+    "qq-penguin",
     "codex-pet",
   );
   await fs.mkdir(targetAttackPublicRoot, { recursive: true });
@@ -711,7 +673,7 @@ try {
   const outsidePublicSentinel = path.join(outsidePublicTree, "sentinel.txt");
   await fs.writeFile(outsideLocalSentinel, "outside local sentinel\n");
   await fs.writeFile(outsidePublicSentinel, "outside public sentinel\n");
-  const linkedLocalComponent = path.join(junctionLocalParent, "public-mascot");
+  const linkedLocalComponent = path.join(junctionLocalParent, "qq-penguin");
   const linkedPublicRoot = path.join(junctionPublicParent, "local");
   let generatedJunctionsCreated = false;
   try {

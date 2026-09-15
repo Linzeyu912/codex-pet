@@ -8,7 +8,7 @@ const release = argumentsSet.has("--release");
 const ci = argumentsSet.has("--ci") || process.env.CI === "true";
 const withTauri = true;
 const powershell = process.platform === "win32" ? "powershell.exe" : "pwsh";
-const safeEnvironment = { ...process.env, CODEX_PET_FORCE_PUBLIC_MASCOT: "1" };
+const safeEnvironment = { ...process.env, };
 
 function run(label, command, args, options = {}) {
   console.log(`\n==> ${label}`);
@@ -56,8 +56,9 @@ run("Install safety self-tests", process.execPath, ["scripts/test-install-safety
 run("Runtime policy self-tests", process.execPath, ["scripts/test-runtime-policy.mjs"]);
 run("TypeScript check", process.execPath, ["node_modules/typescript/bin/tsc", "--noEmit"]);
 run("Web production build", process.execPath, ["node_modules/vite/bin/vite.js", "build"]);
-run("Redistributable original mascot atlas", process.execPath, ["scripts/prepare-local-assets.mjs"]);
+run("Red scarf penguin atlas", process.execPath, ["scripts/prepare-local-assets.mjs"]);
 run("Animation continuity", process.execPath, ["scripts/check-animation-continuity.mjs"]);
+run("Character regression checks", process.execPath, ["scripts/test-character.mjs"]);
 
 if (process.platform === "win32") {
   run("PowerShell syntax", powershell, ["-NoProfile", "-File", "scripts/Test-PowerShellSyntax.ps1"]);

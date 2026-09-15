@@ -34,7 +34,7 @@ const VALID_STATES: [&str; 13] = [
     "mischief",
 ];
 const MAX_SAFE_UPDATED_AT: u64 = 9_007_199_254_740_991;
-const PUBLIC_PET_ID: &str = "codex-aurora-penguin";
+const PUBLIC_PET_ID: &str = "qq-penguin";
 const INSTALL_OWNER: &str = "io.github.linzeyu912.codex-pet";
 const INSTALL_RECEIPT: &str = ".codex-pet-install-receipt.json";
 const PET_MANIFEST_BYTES: &[u8] = include_bytes!("../../public/local/pet.json");

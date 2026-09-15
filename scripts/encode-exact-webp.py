@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import io
+import sys
 from pathlib import Path
 
 from PIL import Image
@@ -25,6 +27,11 @@ def main() -> None:
     parser.add_argument("input")
     parser.add_argument("output")
     args = parser.parse_args()
+    if args.input == "-" and args.output == "-":
+        with Image.open(io.BytesIO(sys.stdin.buffer.read())) as opened:
+            image = clear_transparent_rgb(opened)
+        image.save(sys.stdout.buffer, format="WEBP", lossless=True, quality=100, method=6, exact=True)
+        return
     input_path = Path(args.input).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
     with Image.open(input_path) as opened:

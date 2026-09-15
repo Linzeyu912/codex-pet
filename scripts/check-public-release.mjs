@@ -30,24 +30,27 @@ if (!(await pathExists(petManifestPath))) {
   violations.push("generated public pet manifest is missing");
 } else {
   const manifest = await readJson(petManifestPath);
-  if (manifest.id !== "codex-aurora-penguin") violations.push(`unexpected public pet id: ${manifest.id}`);
+  if (manifest.id !== "qq-penguin") violations.push(`unexpected public pet id: ${manifest.id}`);
   if (manifest.spriteVersionNumber !== 2) violations.push("public pet manifest is not V2");
 }
 
 let trackedFiles = [];
 try {
-  trackedFiles = execFileSync("git", ["-C", projectRoot, "ls-files", "-z"], { encoding: "utf8" })
+  trackedFiles = execFileSync("git", ["-C", projectRoot, "ls-files", "-z", ...(profile === "debug" ? ["--cached", "--others", "--exclude-standard"] : [])], { encoding: "utf8" })
     .split("\0")
     .filter(Boolean)
     .map((file) => file.replaceAll("\\", "/"));
+  if (profile === "debug") {
+    const present = await Promise.all(trackedFiles.map(async (file) => (await pathExists(path.join(projectRoot, file))) ? file : null));
+    trackedFiles = present.filter(Boolean);
+  }
 } catch (error) {
   violations.push(`unable to inspect Git tracked files: ${error.message}`);
 }
 
 const forbiddenTrackedPrefixes = [".local-assets/", "public/local/", "release/", "src-tauri/target/"];
 const approvedPublicRasters = new Set([
-  "public/aurora-penguin.png",
-  "public/aurora-penguin-wave.png",
+  "public/qq-penguin-source.png",
 ]);
 for (const file of trackedFiles) {
   if (forbiddenTrackedPrefixes.some((prefix) => file.startsWith(prefix))) {
@@ -63,7 +66,7 @@ for (const file of trackedFiles) {
 }
 
 for (const sourceAsset of approvedPublicRasters) {
-  if (!trackedFiles.includes(sourceAsset)) violations.push(`approved public mascot source is not tracked: ${sourceAsset}`);
+  if (!trackedFiles.includes(sourceAsset)) violations.push(`red-scarf character source is not tracked: ${sourceAsset}`);
 }
 
 const bundleRoot = path.join(projectRoot, "src-tauri", "target", profile, "bundle", "nsis");

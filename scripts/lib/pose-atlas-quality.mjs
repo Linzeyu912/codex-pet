@@ -12,9 +12,9 @@ export const POSE_ATLAS_HEIGHT = 832;
 export const POSE_ATLAS_CELL_MARGIN = 4;
 
 export const POSE_ACTION_INDICES = Object.freeze({
-  mischief: [9, 8, 9, 10, 11, 10, 9],
-  lying: [10, 11, 13, 12, 13, 13, 13, 12, 13, 11, 15],
-  rolling: [10, 11, 13, 12, 13, 14, 13, 12, 13, 11, 15],
+  mischief: [4, 10, 11, 11, 10, 4, 9],
+  lying: [15, 12, 13, 13, 13, 13, 13, 13, 12, 15, 9],
+  rolling: [15, 12, 13, 13, 14, 14, 14, 13, 12, 15, 9],
 });
 
 const CELL_WIDTH = 192;

@@ -4,7 +4,6 @@ import { projectRoot } from "./lib/project-utils.mjs";
 
 const publicEnvironment = {
   ...process.env,
-  CODEX_PET_FORCE_PUBLIC_MASCOT: "1",
 };
 
 const forwardedArguments = process.argv.slice(2);

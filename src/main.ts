@@ -183,7 +183,7 @@ function configureDesktopPoseAnimations(): void {
     atlas: "poses",
   });
   animations.mischief = {
-    cells: [mainIdle, pose(9), pose(8), pose(9), pose(10), pose(11), pose(10), pose(9), mainIdle],
+    cells: [mainIdle, pose(4), pose(10), pose(11), pose(11), pose(10), pose(4), pose(9), mainIdle],
     frames: 9,
     durations: [160, 160, 240, 160, 160, 360, 160, 160, 220],
     label: "背过身偷偷调皮",
@@ -192,8 +192,8 @@ function configureDesktopPoseAnimations(): void {
   animations.lying = {
     cells: [
       mainIdle,
-      pose(10), pose(11), pose(13), pose(12), pose(13),
-      pose(13), pose(13), pose(12), pose(13), pose(11), pose(15),
+      pose(15), pose(12), pose(13), pose(13), pose(13),
+      pose(13), pose(13), pose(13), pose(12), pose(15), pose(9),
       mainIdle,
     ],
     frames: 13,
@@ -204,8 +204,8 @@ function configureDesktopPoseAnimations(): void {
   animations.rolling = {
     cells: [
       mainIdle,
-      pose(10), pose(11), pose(13), pose(12), pose(13), pose(14),
-      pose(13), pose(12), pose(13), pose(11), pose(15),
+      pose(15), pose(12), pose(13), pose(13), pose(14), pose(14),
+      pose(14), pose(13), pose(12), pose(15), pose(9),
       mainIdle,
     ],
     frames: 13,
@@ -250,7 +250,7 @@ app.innerHTML = `
     </div>
     <div class="sprite-stage">
       <div class="sprite" role="img" aria-label="Codex 小企鹅"></div>
-      <img class="fallback-pet" src="./aurora-penguin.png" alt="Aurora 企鹅桌面伙伴" />
+      <img class="fallback-pet" src="./local/pixel-base-normalized.png" alt="红围巾企鹅桌面伙伴" />
     </div>
   </section>
   <div class="context-menu" id="pet-menu" role="menu" aria-label="宠物菜单" hidden>
@@ -272,8 +272,9 @@ app.innerHTML = `
     <button type="button" role="menuitem" data-command="quit" class="danger">退出 Codex Pet</button>
   </div>
   <section class="onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" hidden>
-    <h2 id="onboarding-title">让 Aurora 认识 Codex</h2>
+    <h2 id="onboarding-title">让红围巾企鹅认识 Codex</h2>
     <p class="onboarding-status">一键安装宠物素材，并在任务完成时让它跳起来。</p>
+    <p class="asset-notice">非官方同人作品，如有侵权，请联系删除。</p>
     <p class="onboarding-path" hidden></p>
     <div class="onboarding-actions">
       <button type="button" class="primary" data-onboarding="install">一键连接</button>
@@ -378,7 +379,7 @@ function integrationReady(status: CodexIntegrationStatus): boolean {
 function renderIntegrationStatus(status: CodexIntegrationStatus): void {
   onboardingPath.hidden = true;
   if (integrationReady(status)) {
-    onboardingStatus.textContent = "已连接。任务完成时 Aurora 会跳起来；可在 Codex 的 Pets 中选择它。";
+    onboardingStatus.textContent = "已连接。任务完成时 红围巾企鹅 会跳起来；可在 Codex 的 Pets 中选择它。";
     onboardingInstall.textContent = "完成";
     onboardingInstall.disabled = false;
     onboardingInstall.dataset.complete = "true";
@@ -392,7 +393,7 @@ function renderIntegrationStatus(status: CodexIntegrationStatus): void {
     onboardingInstall.disabled = false;
     delete onboardingInstall.dataset.complete;
   } else {
-    onboardingStatus.textContent = "一键安装 Aurora 宠物素材，并在 Codex 任务完成时让它跳起来。";
+    onboardingStatus.textContent = "一键安装 红围巾企鹅 宠物素材，并在 Codex 任务完成时让它跳起来。";
     onboardingInstall.textContent = "一键连接";
     onboardingInstall.disabled = false;
     delete onboardingInstall.dataset.complete;

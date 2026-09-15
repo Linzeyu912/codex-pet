@@ -1,6 +1,6 @@
 # Codex Pets V2 接口契约
 
-本文记录 Codex Pet `0.3.1` 使用的 Codex 自定义宠物格式、状态桥接和本地桌面扩展。Codex 官方说明见 [Pets](https://learn.chatgpt.com/docs/pets)。
+本文记录 Codex Pet `0.4.0` 使用的 Codex 自定义宠物格式、状态桥接和本地桌面扩展。Codex 官方说明见 [Pets](https://learn.chatgpt.com/docs/pets)。
 
 ## Codex 宠物目录
 
@@ -87,13 +87,13 @@ public/local/desktop-poses.png
 - 单格：`192 × 208`
 - 16 格均为非空姿态，并使用统一尺度和脚底基线
 
-姿态来源是被 Git 忽略的 `.local-assets/qq-penguin/poses/pose-sheet-v1.png`：第 1 行左侧步态，第 2 行右侧步态，第 3 行背面/回头/过渡，第 4 行侧躺/仰躺/翻滚/恢复。Tauri 在检测到该图集时，用它编排：
+姿态来源是 `public/qq-penguin-source.png`：第 1 行左侧步态，第 2 行右侧步态，第 3 行背面/回头/过渡，第 4 行侧躺/仰躺/翻滚/恢复。Tauri 在检测到该图集时，用它编排：
 
 - `mischief`：正面 → 回头 → 背身调皮 → 转回正面
 - `lying`：正面 → 下蹲/转身 → 侧躺/仰躺 → 坐起 → 正面
 - `rolling`：正面 → 侧倒 → 翻身 → 恢复坐姿 → 正面
 
-没有 `desktop-poses.png` 时，这三种桌面动作退回 V2 `failed` 行的兼容序列。该扩展不会复制到 Codex 的宠物目录；公共 Tauri 安装器也不会包含经典本地图集。
+没有 `desktop-poses.png` 时，这三种桌面动作退回 V2 `failed` 行的兼容序列。该扩展不会复制到 Codex 的宠物目录；Tauri 安装器包含同一套红围巾图集。
 
 ## 状态文件协议
 
@@ -125,7 +125,7 @@ Codex 官方外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-
 
 ## 安装、升级与卸载约束
 
-公共桌面版的首次启动引导复用相同的 ownership receipt 契约，并额外遵守用户配置边界：只修改用户级 `%CODEX_HOME%/config.toml`；仅当顶层 `notify` 不存在时写入 `["<当前 Codex Pet.exe>", "--codex-notify"]`；已有任意其他 `notify` 时报告冲突并保持文件逐字不变。配置文件或宠物目标是链接/junction 时拒绝写入。修改通知配置后需要重启 Codex 客户端。
+桌面版的首次启动引导复用相同的 ownership receipt 契约，并额外遵守用户配置边界：只修改用户级 `%CODEX_HOME%/config.toml`；仅当顶层 `notify` 不存在时写入 `["<当前 Codex Pet.exe>", "--codex-notify"]`；已有任意其他 `notify` 时报告冲突并保持文件逐字不变。配置文件或宠物目标是链接/junction 时拒绝写入。修改通知配置后需要重启 Codex 客户端。
 
 安装器仅复制 `pet.json` 与 `spritesheet.webp`，并创建 ownership receipt：
 
@@ -137,21 +137,10 @@ Codex 官方外部 [`notify`](https://learn.chatgpt.com/docs/config-file/config-
 
 可用 `--codex-home <path>` 测试隔离配置，避免改动日常 Codex 目录。
 
-## QA 与公开发布契约
+## QA 与构建契约
 
-`pnpm verify` 统一检查版本、Node 脚本、TypeScript、Web 构建、公开原创 Aurora 图集、动画连续性、Rust/Tauri 编译和 Windows 支持脚本；本机存在 Codex 官方校验器时也会调用它。`pnpm release:gate` 额外执行 Rust 单元测试、生成唯一的 Tauri NSIS 安装器并检查发布政策；CI 的 `pnpm verify:ci` 执行同一正式链路。
+桌面与 Codex 均使用 qq-penguin，源图为 public/qq-penguin-source.png。构建只使用一套姿态，不再选择不同角色。
 
-NSIS 安装器必须带有同名 `.sha256` 和 `.release.json`。元数据使用 `codex-pet-release/v1`，绑定 SemVer、构建 profile、工件名、字节数、SHA-256、Git commit、工作区清洁状态和构建时间；正式 Release 必须来自当前 clean commit。发布标签必须严格等于 `v<package.json version>`。
+共同缩放校验从所有源图/输出尺寸独立求交集；跨图集同一姿态逐像素相等。不同角度站立高度差上限 6%，检查的是生成源图的残差，不使用逐帧拉伸掩盖它。跳跃须为基准帧精确平移；瞳孔移动限制于眼白区域，并检查 16 方向语义。围巾尾端固定在自身左侧：正面观众右侧和左行近侧必须可见，右行与背面必须遮挡。
 
-公共 Aurora 图集使用严格几何配置：站立动作可见高度比例不超过 `1.015`，当前生成目标为 `170px`；悬停跳跃五帧必须是 idle 的精确垂直平移；方向循环必须通过眼内高光的顺时针语义检查；公开 PNG 不允许半透明边缘或透明像素残留 RGB，从源头避免底色光晕。
-
-本地经典图集只有在以下权威 QA 工件全部通过、与同一 atlas SHA-256 绑定且时间未过期时，才可被构建器选用：官方 V2 校验、逐行动画连续性、完整覆盖 14 个水平/垂直对照的方向盲测、方向语义、方向循环、最终帧审阅，以及青色色键边缘审计。边缘审计使用 `#00FFFF`、色距 `160`、透明度下限 `1`，要求连低透明度的残留底色也为零。盲测图必须由待测图集确定性生成；方向盲测采用三位互相隔离、不可见答案的评审，14 对共 28 个观察必须全体一致、没有 `ambiguous` 且置信度至少为 `medium`。图集、盲测图与三份原始 verdict 均绑定 SHA-256，汇总时和构建时都会重新解析原始投票。权威汇总使用 `codex-pet-authoritative-run/v2`，目标是 `ok: true`、零错误、零警告；旧汇总会被拒绝。所有固定生成目录在写入前拒绝符号链接、junction 和 realpath 逃逸，并以同级临时文件原子替换输出。
-
-公共构建始终设置原创 Aurora 资源，并拒绝以下内容：
-
-- Git 跟踪的 `.local-assets/`、`public/local/`、`release/` 文件
-- 除 `public/aurora-penguin.png`、`public/aurora-penguin-wave.png` 和应用图标外的未批准栅格素材
-- `local-classic` 包或非 `codex-aurora-penguin` 的公共 manifest
-- 版本、构建 manifest 或 SHA-256 sidecar 不一致
-
-`pnpm build:tauri` 与 `pnpm build:desktop` 都强制选择公开 Aurora 素材；经典本地素材仅可通过 `pnpm dev` 用于个人实验，不存在可误传的经典素材安装器命令。
+pnpm verify 检查图集、动画、脚本、安装安全、前端与 Rust。pnpm build:desktop -- --debug 生成可试用的桌面包；正式发布仍需干净工作区和发布工件校验。图像与代码许可边界见 ASSET-LICENSES.md。
